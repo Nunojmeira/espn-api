@@ -121,3 +121,66 @@ class LeagueWatchlistTest(TestCase):
         filters = json.loads(second_headers['x-fantasy-filter'])
         self.assertEqual(filters['players']['filterTeamIds']['value'], [9])
         self.assertEqual(filters['players']['limit'], 10)
+
+    def test_team_watchlist_handles_player_pool_entry(self):
+        league = League(league_id=789012, year=2024, fetch_league=False)
+        league.pro_schedule = {}
+
+        watchlist_response = {
+            "playerWatchList": {
+                "watchlists": [
+                    {
+                        "teamId": 3,
+                        "entries": [
+                            {
+                                "lineupSlotId": 0,
+                                "playerPoolEntry": {
+                                    "player": {
+                                        "id": 401,
+                                        "fullName": "Pool Entry Guard",
+                                        "defaultPositionId": 1,
+                                        "eligibleSlots": [0, 1],
+                                        "proTeamId": 5,
+                                        "injuryStatus": "ACTIVE",
+                                        "stats": [],
+                                    }
+                                },
+                            },
+                            {
+                                "lineupSlotId": 0,
+                                "playerPoolEntry": {
+                                    "player": {
+                                        "id": 402,
+                                        "fullName": "Pool Entry Forward",
+                                        "defaultPositionId": 4,
+                                        "eligibleSlots": [4, 6],
+                                        "proTeamId": 12,
+                                        "injuryStatus": "INJURY_RESERVE",
+                                        "stats": [],
+                                    }
+                                },
+                            },
+                        ],
+                    }
+                ]
+            }
+        }
+
+        fake_request = FakeRequest([watchlist_response])
+        league.espn_request = fake_request
+
+        players = league.team_watchlist(team_id=3, size=10)
+
+        self.assertEqual(len(players), 2)
+        player_names = [player.name for player in players]
+        self.assertIn("Pool Entry Guard", player_names)
+        self.assertIn("Pool Entry Forward", player_names)
+
+        positions = {player.name: player.position for player in players}
+        self.assertEqual(positions["Pool Entry Guard"], "PG")
+        self.assertEqual(positions["Pool Entry Forward"], "PF")
+
+        self.assertEqual(len(fake_request.calls), 1)
+        params, headers = fake_request.calls[0]
+        self.assertEqual(params, {'view': 'player_wl'})
+        self.assertIsNone(headers)

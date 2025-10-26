@@ -16,7 +16,7 @@ from pathlib import Path
 import tkinter as tk
 from tkinter import messagebox, ttk
 from functools import partial
-from typing import Any, Dict, Iterable, List, Optional, Sequence
+from typing import Any, Dict, Iterable, List, Optional, Sequence, Tuple
 
 from espn_api.basketball import League
 from espn_api.basketball.player import Player
@@ -37,7 +37,9 @@ class NBAWatchlistApp:
         self.root.title("ESPN NBA Fantasy Watchlist")
         self.root.geometry("1280x620")
 
-        self._saved_preferences = self._load_saved_preferences()
+        self._saved_preferences, self._saved_column_widths = self._load_saved_preferences()
+        self._saved_column_widths.setdefault("player", {})
+        self._saved_column_widths.setdefault("watchlist", {})
 
         self.league: Optional[League] = None
         self.watchlist_ids: List[int] = []
@@ -49,6 +51,7 @@ class NBAWatchlistApp:
             {"id": "nba_team", "title": "NBA Team", "width": 110, "anchor": tk.CENTER, "visible": True},
             {"id": "position", "title": "Position", "width": 100, "anchor": tk.CENTER, "visible": True},
             {"id": "availability", "title": "Availability", "width": 190, "anchor": tk.W, "visible": True},
+            {"id": "today_fpts", "title": "FPts", "width": 90, "anchor": tk.CENTER, "visible": True},
             {"id": "fpts_avg", "title": "Season Avg FPts", "width": 130, "anchor": tk.CENTER, "visible": True},
             {"id": "recent", "title": "Last 7 Avg FPts", "width": 130, "anchor": tk.CENTER, "visible": True},
             {"id": "status", "title": "Status", "width": 160, "anchor": tk.W, "visible": True},
@@ -75,6 +78,11 @@ class NBAWatchlistApp:
         self._live_plus_minus_cache: Dict[int, str] = {}
 
         self._build_widgets()
+        self._restore_column_widths()
+        self._apply_column_settings("player")
+        self._apply_column_settings("watchlist")
+
+        self.root.protocol("WM_DELETE_WINDOW", self._on_close)
 
     # ------------------------------------------------------------------
     # UI construction helpers
@@ -190,7 +198,7 @@ class NBAWatchlistApp:
                 column_id,
                 anchor=config["anchor"],
                 width=config["width"],
-                stretch=False,
+                stretch=True,
             )
 
         self.player_tree.pack(fill=tk.BOTH, expand=True, side=tk.LEFT, padx=5, pady=(0, 5))
@@ -223,7 +231,7 @@ class NBAWatchlistApp:
                 column_id,
                 anchor=config["anchor"],
                 width=config["width"],
-                stretch=False,
+                stretch=True,
             )
 
         self.tree.pack(fill=tk.BOTH, expand=True, side=tk.TOP, padx=5, pady=(0, 5))
@@ -234,8 +242,6 @@ class NBAWatchlistApp:
         watchlist_scroll_x.pack(side=tk.BOTTOM, fill=tk.X)
         self.tree.configure(yscrollcommand=watchlist_scroll_y.set, xscrollcommand=watchlist_scroll_x.set)
 
-        self._apply_column_settings("player")
-        self._apply_column_settings("watchlist")
         self._build_options_tab(options_tab)
 
         # Status bar ----------------------------------------------------
@@ -259,6 +265,59 @@ class NBAWatchlistApp:
         watchlist_options = ttk.LabelFrame(container, text="Watchlist Columns")
         watchlist_options.pack(fill=tk.BOTH, expand=True, padx=10, pady=(0, 10))
         self._create_column_options_widgets(watchlist_options, "watchlist")
+
+    def _restore_column_widths(self) -> None:
+        for key, tree in (("player", getattr(self, "player_tree", None)), ("watchlist", getattr(self, "tree", None))):
+            if not tree:
+                continue
+            saved_widths = self._saved_column_widths.get(key, {}) if hasattr(self, "_saved_column_widths") else {}
+            for config in self._get_column_configs(key):
+                column_id = config["id"]
+                width = saved_widths.get(column_id)
+                if isinstance(width, int) and width > 0:
+                    tree.column(column_id, width=width)
+
+    def _capture_tree_widths(self, tree: ttk.Treeview) -> Dict[str, int]:
+        widths: Dict[str, int] = {}
+        if not tree:
+            return widths
+        for column_id in tree["columns"]:
+            info = tree.column(column_id)
+            width = info.get("width")
+            if isinstance(width, int) and width > 0:
+                widths[column_id] = width
+        return widths
+
+    def _on_close(self) -> None:
+        player_widths: Dict[str, int] = {}
+        watchlist_widths: Dict[str, int] = {}
+        if hasattr(self, "player_tree"):
+            player_widths = self._capture_tree_widths(self.player_tree)
+        if hasattr(self, "tree"):
+            watchlist_widths = self._capture_tree_widths(self.tree)
+
+        self._saved_column_widths["player"] = player_widths
+        self._saved_column_widths["watchlist"] = watchlist_widths
+
+        league_id = self.league_id_var.get().strip() if hasattr(self, "league_id_var") else self._saved_preferences.get("league_id", "")
+        year = self.year_var.get().strip() if hasattr(self, "year_var") else self._saved_preferences.get("year", "")
+        espn_s2 = self.espn_s2_var.get().strip() if hasattr(self, "espn_s2_var") else self._saved_preferences.get("espn_s2", "")
+        swid = self.swid_var.get().strip() if hasattr(self, "swid_var") else self._saved_preferences.get("swid", "")
+
+        league_id = league_id or self._saved_preferences.get("league_id", "")
+        year = year or self._saved_preferences.get("year", "")
+        espn_s2 = espn_s2 or self._saved_preferences.get("espn_s2", "")
+        swid = swid or self._saved_preferences.get("swid", "")
+
+        self._save_preferences(
+            league_id=league_id,
+            year=year,
+            espn_s2=espn_s2,
+            swid=swid,
+            column_widths=self._saved_column_widths,
+        )
+
+        self.root.destroy()
 
     def _create_column_options_widgets(self, frame: ttk.Frame, key: str) -> None:
         frame.columnconfigure(0, weight=1)
@@ -766,6 +825,7 @@ class NBAWatchlistApp:
             for player in team.roster:
                 avg_points = getattr(player, "avg_points", None)
                 recent_points = self._calculate_average(player, games=7)
+                today_metrics = self._get_today_metrics(player)
                 players[player.playerId] = {
                     "player_id": player.playerId,
                     "name": player.name,
@@ -775,6 +835,7 @@ class NBAWatchlistApp:
                     "is_free_agent": False,
                     "avg_points": avg_points,
                     "recent_points": recent_points,
+                    "today_fpts": self._format_numeric(today_metrics.get("points")),
                     "status": self._format_player_status(player),
                 }
 
@@ -784,6 +845,7 @@ class NBAWatchlistApp:
             free_agents = []
 
         for player in free_agents:
+            today_metrics = self._get_today_metrics(player)
             entry = {
                 "player_id": player.playerId,
                 "name": player.name,
@@ -793,6 +855,7 @@ class NBAWatchlistApp:
                 "is_free_agent": True,
                 "avg_points": getattr(player, "avg_points", None),
                 "recent_points": self._calculate_average(player, games=7),
+                "today_fpts": self._format_numeric(today_metrics.get("points")),
                 "status": self._format_player_status(player),
             }
             if player.playerId in players:
@@ -802,6 +865,7 @@ class NBAWatchlistApp:
                 players[player.playerId]["position"] = player.position
                 players[player.playerId]["avg_points"] = entry["avg_points"]
                 players[player.playerId]["recent_points"] = entry["recent_points"]
+                players[player.playerId]["today_fpts"] = entry["today_fpts"]
                 players[player.playerId]["status"] = entry["status"]
             else:
                 players[player.playerId] = entry
@@ -832,6 +896,7 @@ class NBAWatchlistApp:
                 "nba_team": info["pro_team"],
                 "position": info["position"],
                 "availability": availability,
+                "today_fpts": info.get("today_fpts", "-"),
                 "fpts_avg": self._format_numeric(info.get("avg_points")),
                 "recent": self._format_numeric(info.get("recent_points")),
                 "status": info.get("status", "Active"),

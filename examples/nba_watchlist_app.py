@@ -309,11 +309,15 @@ class NBAWatchlistApp:
         espn_s2 = espn_s2 or self._saved_preferences.get("espn_s2", "")
         swid = swid or self._saved_preferences.get("swid", "")
 
+        watchlist_key = self._current_watchlist_key()
+
         self._save_preferences(
             league_id=league_id,
             year=year,
             espn_s2=espn_s2,
             swid=swid,
+            watchlist_key=watchlist_key,
+            watchlist_ids=self.watchlist_ids,
             column_widths=self._saved_column_widths,
         )
 

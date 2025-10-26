@@ -405,17 +405,24 @@ class NBAWatchlistApp:
         self.league = league
         self._live_plus_minus_cache.clear()
         self._populate_teams()
-        self.watchlist_ids.clear()
+
+        watchlist_key = self._compose_watchlist_key(league_id, year)
+        saved_watchlist = self._load_watchlist_ids(watchlist_key)
+        self.watchlist_ids = saved_watchlist
+
         self.tree.delete(*self.tree.get_children())
         self.player_tree.delete(*self.player_tree.get_children())
         self._collect_league_players()
         self._populate_player_directory()
+        self.refresh_watchlist()
         self._set_status("League loaded. Add players or import a roster to begin.")
         self._save_preferences(
             league_id=league_id,
             year=year,
             espn_s2=espn_s2,
             swid=swid,
+            watchlist_key=watchlist_key,
+            watchlist_ids=self.watchlist_ids,
         )
 
     def add_selected_team(self) -> None:
@@ -429,6 +436,7 @@ class NBAWatchlistApp:
                 self.watchlist_ids.append(player.playerId)
                 added += 1
         if added:
+            self._persist_current_watchlist()
             self._set_status(f"Added {added} players from {team.team_name} to the watchlist.")
             self.refresh_watchlist()
         else:
@@ -459,6 +467,7 @@ class NBAWatchlistApp:
                 added += 1
 
         if added:
+            self._persist_current_watchlist()
             self._set_status(f"Added {added} players from {team.team_name}'s watchlist.")
             self.refresh_watchlist()
         else:
@@ -502,6 +511,7 @@ class NBAWatchlistApp:
                 added += 1
 
         if added:
+            self._persist_current_watchlist()
             self._set_status(f"Added {added} players to the watchlist.")
             self.refresh_watchlist()
         else:
@@ -523,6 +533,7 @@ class NBAWatchlistApp:
 
         if player_id not in self.watchlist_ids:
             self.watchlist_ids.append(player_id)
+            self._persist_current_watchlist()
             self._set_status(f"Added player {self.league.player_map.get(player_id, query)} to watchlist.")
             self.refresh_watchlist()
         else:
@@ -533,6 +544,7 @@ class NBAWatchlistApp:
         if not selections:
             return
 
+        removed = False
         for item in selections:
             try:
                 player_id = int(item)
@@ -540,9 +552,12 @@ class NBAWatchlistApp:
                 continue
             if player_id in self.watchlist_ids:
                 self.watchlist_ids.remove(player_id)
+                removed = True
         for item in selections:
             self.tree.delete(item)
 
+        if removed:
+            self._persist_current_watchlist()
         self._set_status("Removed selected players from the watchlist.")
 
     def refresh_watchlist(self) -> None:
@@ -601,34 +616,145 @@ class NBAWatchlistApp:
     def _preferences_path(self) -> Path:
         return Path.home() / ".espn_nba_watchlist.json"
 
-    def _load_saved_preferences(self) -> Dict[str, str]:
+    def _load_saved_preferences(self) -> Dict[str, Any]:
         path = self._preferences_path()
+        base: Dict[str, Any] = {"watchlists": {}}
         try:
             with path.open("r", encoding="utf-8") as handle:
-                data = json.load(handle)
-            if isinstance(data, dict):
-                return {k: str(v) for k, v in data.items() if isinstance(k, str)}
+                raw_data = json.load(handle)
         except FileNotFoundError:
-            return {}
+            return base
         except (OSError, json.JSONDecodeError):
-            return {}
-        return {}
+            return base
 
-    def _save_preferences(self, *, league_id: str, year: str, espn_s2: str, swid: str) -> None:
-        data = {
-            "league_id": league_id,
-            "year": year,
-        }
-        if espn_s2:
-            data["espn_s2"] = espn_s2
-        if swid:
-            data["swid"] = swid
+        if not isinstance(raw_data, dict):
+            return base
+
+        data: Dict[str, Any] = {"watchlists": {}}
+        for key in ("league_id", "year", "espn_s2", "swid"):
+            if key in raw_data:
+                value = raw_data.get(key)
+                if value is not None:
+                    data[key] = str(value)
+
+        watchlists = raw_data.get("watchlists")
+        if isinstance(watchlists, dict):
+            normalized: Dict[str, List[int]] = {}
+            for key, value in watchlists.items():
+                if not isinstance(key, str):
+                    continue
+                if isinstance(value, list):
+                    sanitized = self._sanitize_watchlist_ids(value)
+                    if sanitized:
+                        normalized[key] = sanitized
+                    else:
+                        normalized[key] = []
+            data["watchlists"] = normalized
+
+        return data
+
+    def _save_preferences(
+        self,
+        *,
+        league_id: Optional[str] = None,
+        year: Optional[str] = None,
+        espn_s2: Optional[str] = None,
+        swid: Optional[str] = None,
+        watchlist_key: Optional[str] = None,
+        watchlist_ids: Optional[Iterable[Any]] = None,
+    ) -> None:
+        data: Dict[str, Any] = dict(self._saved_preferences)
+        watchlists: Dict[str, List[int]] = dict(data.get("watchlists", {}))
+
+        active_key: Optional[str] = None
+        if league_id is not None:
+            data["league_id"] = str(league_id)
+        if year is not None:
+            data["year"] = str(year)
+        if league_id is not None and year is not None:
+            active_key = self._compose_watchlist_key(league_id, year)
+
+        if espn_s2 is not None:
+            if espn_s2:
+                data["espn_s2"] = str(espn_s2)
+            else:
+                data.pop("espn_s2", None)
+        if swid is not None:
+            if swid:
+                data["swid"] = str(swid)
+            else:
+                data.pop("swid", None)
+
+        if watchlist_key is not None:
+            sanitized_ids = self._sanitize_watchlist_ids(watchlist_ids)
+            if sanitized_ids:
+                watchlists[watchlist_key] = sanitized_ids
+            else:
+                watchlists.pop(watchlist_key, None)
+
+        if active_key is not None:
+            watchlists = {key: ids for key, ids in watchlists.items() if key == active_key}
+
+        data["watchlists"] = watchlists
+        self._saved_preferences = data
 
         path = self._preferences_path()
         try:
             path.write_text(json.dumps(data, indent=2), encoding="utf-8")
         except OSError:
             pass
+
+    @staticmethod
+    def _compose_watchlist_key(league_id: Any, year: Any) -> Optional[str]:
+        league_str = str(league_id).strip() if league_id is not None else ""
+        year_str = str(year).strip() if year is not None else ""
+        if league_str and year_str:
+            return f"{league_str}:{year_str}"
+        return None
+
+    def _current_watchlist_key(self) -> Optional[str]:
+        if getattr(self, "league", None) is not None:
+            league_id = getattr(self.league, "league_id", None)
+            year = getattr(self.league, "year", None)
+            key = self._compose_watchlist_key(league_id, year)
+            if key:
+                return key
+        league_id = self.league_id_var.get().strip() if hasattr(self, "league_id_var") else ""
+        year = self.year_var.get().strip() if hasattr(self, "year_var") else ""
+        return self._compose_watchlist_key(league_id, year)
+
+    def _sanitize_watchlist_ids(self, watchlist_ids: Optional[Iterable[Any]]) -> List[int]:
+        if not watchlist_ids:
+            return []
+        sanitized: List[int] = []
+        seen: set[int] = set()
+        for value in watchlist_ids:
+            try:
+                player_id = int(value)
+            except (TypeError, ValueError):
+                continue
+            if player_id in seen:
+                continue
+            sanitized.append(player_id)
+            seen.add(player_id)
+        return sanitized
+
+    def _load_watchlist_ids(self, watchlist_key: Optional[str]) -> List[int]:
+        if not watchlist_key:
+            return []
+        stored = self._saved_preferences.get("watchlists", {})
+        if not isinstance(stored, dict):
+            return []
+        values = stored.get(watchlist_key)
+        if not isinstance(values, list):
+            return []
+        return self._sanitize_watchlist_ids(values)
+
+    def _persist_current_watchlist(self) -> None:
+        watchlist_key = self._current_watchlist_key()
+        if not watchlist_key:
+            return
+        self._save_preferences(watchlist_key=watchlist_key, watchlist_ids=self.watchlist_ids)
 
     def _collect_league_players(self) -> None:
         if not self.league:

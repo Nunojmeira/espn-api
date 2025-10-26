@@ -63,6 +63,23 @@ from espn_api.baseball import League
 league = League(league_id=222, year=2019)
 ```
 
+### Example application: NBA fantasy watchlist
+
+The repository now includes an interactive command line utility that tracks an
+NBA watchlist using live league data.  Launch it with::
+
+    python -m examples.nba_watchlist_app --league-id <LEAGUE_ID> --year <SEASON>
+
+Provide your ``espn_s2`` and ``SWID`` cookies when working with a private
+league::
+
+    python -m examples.nba_watchlist_app --league-id <LEAGUE_ID> --year <SEASON> \
+        --espn-s2 <ESPNS2_COOKIE> --swid <SWID_COOKIE>
+
+The app supports building a watchlist, importing an entire roster, checking
+current-day box score results, upcoming schedules, and rolling fantasy point
+averages.
+
 
 ## [Discussions](https://github.com/cwendt94/espn-api/discussions) (new)
 If you have any questions about the package, ESPN API data, or want to talk about a feature please start a [discussion](https://github.com/cwendt94/espn-api/discussions)! 

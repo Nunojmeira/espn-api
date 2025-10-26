@@ -675,19 +675,20 @@ class NBAWatchlistApp:
     def _preferences_path(self) -> Path:
         return Path.home() / ".espn_nba_watchlist.json"
 
-    def _load_saved_preferences(self) -> Dict[str, Any]:
+    def _load_saved_preferences(self) -> Tuple[Dict[str, Any], Dict[str, Dict[str, int]]]:
         path = self._preferences_path()
-        base: Dict[str, Any] = {"watchlists": {}}
+        base_preferences: Dict[str, Any] = {"watchlists": {}}
+        base_widths: Dict[str, Dict[str, int]] = {}
         try:
             with path.open("r", encoding="utf-8") as handle:
                 raw_data = json.load(handle)
         except FileNotFoundError:
-            return base
+            return base_preferences, base_widths
         except (OSError, json.JSONDecodeError):
-            return base
+            return base_preferences, base_widths
 
         if not isinstance(raw_data, dict):
-            return base
+            return base_preferences, base_widths
 
         data: Dict[str, Any] = {"watchlists": {}}
         for key in ("league_id", "year", "espn_s2", "swid"):
@@ -710,7 +711,9 @@ class NBAWatchlistApp:
                         normalized[key] = []
             data["watchlists"] = normalized
 
-        return data
+        column_widths = self._normalize_column_widths(raw_data.get("column_widths"))
+
+        return data, column_widths
 
     def _save_preferences(
         self,
@@ -721,9 +724,11 @@ class NBAWatchlistApp:
         swid: Optional[str] = None,
         watchlist_key: Optional[str] = None,
         watchlist_ids: Optional[Iterable[Any]] = None,
+        column_widths: Optional[Dict[str, Dict[str, Any]]] = None,
     ) -> None:
         data: Dict[str, Any] = dict(self._saved_preferences)
         watchlists: Dict[str, List[int]] = dict(data.get("watchlists", {}))
+        saved_widths = self._normalize_column_widths(column_widths or self._saved_column_widths)
 
         active_key: Optional[str] = None
         if league_id is not None:
@@ -755,13 +760,38 @@ class NBAWatchlistApp:
             watchlists = {key: ids for key, ids in watchlists.items() if key == active_key}
 
         data["watchlists"] = watchlists
+        data["column_widths"] = saved_widths
         self._saved_preferences = data
+        self._saved_column_widths = saved_widths
 
         path = self._preferences_path()
         try:
             path.write_text(json.dumps(data, indent=2), encoding="utf-8")
         except OSError:
             pass
+
+    def _normalize_column_widths(
+        self, column_widths: Optional[Dict[str, Any]]
+    ) -> Dict[str, Dict[str, int]]:
+        if not isinstance(column_widths, dict):
+            return {}
+        normalized: Dict[str, Dict[str, int]] = {}
+        for table_key, table_widths in column_widths.items():
+            if not isinstance(table_key, str) or not isinstance(table_widths, dict):
+                continue
+            filtered: Dict[str, int] = {}
+            for column_id, width in table_widths.items():
+                if not isinstance(column_id, str):
+                    continue
+                try:
+                    width_value = int(width)
+                except (TypeError, ValueError):
+                    continue
+                if width_value > 0:
+                    filtered[column_id] = width_value
+            if filtered:
+                normalized[table_key] = filtered
+        return normalized
 
     @staticmethod
     def _compose_watchlist_key(league_id: Any, year: Any) -> Optional[str]:

@@ -212,6 +212,47 @@ class League(BaseLeague):
                 news[id] = self.espn_request.get_player_news(id)
 
         if len(data['players']) == 1:
-            return Player(data['players'][0], self.year, self.pro_schedule, news=news.get(playerId[0], []) if include_news else None)
+            return Player(
+                data['players'][0],
+                self.year,
+                self.pro_schedule,
+                news=news.get(playerId[0], []) if include_news else None,
+            )
         if len(data['players']) > 1:
-            return [Player(player, self.year, self.pro_schedule, news=news.get(player['id'], []) if include_news else None) for player in data['players']]
+            return [
+                Player(
+                    player,
+                    self.year,
+                    self.pro_schedule,
+                    news=news.get(player['id'], []) if include_news else None,
+                )
+                for player in data['players']
+            ]
+
+    def team_watchlist(self, team_id: int, size: int = 40) -> List[Player]:
+        """Return the players that belong to the selected team's ESPN watchlist."""
+
+        if self.year < 2019:
+            raise Exception('Cant use watchlist before 2019')
+
+        params = {'view': 'mWatchlist'}
+        filters = {
+            "players": {
+                "filterTeamIds": {"value": [team_id]},
+                "limit": size,
+            }
+        }
+        headers = {'x-fantasy-filter': json.dumps(filters)}
+
+        data = self.espn_request.league_get(params=params, headers=headers)
+        entries = []
+        if isinstance(data, dict):
+            if isinstance(data.get('players'), list):
+                entries = data['players']
+            elif isinstance(data.get('watchlist'), dict):
+                watchlist = data['watchlist']
+                if isinstance(watchlist.get('players'), list):
+                    entries = watchlist['players']
+
+        pro_schedule = getattr(self, 'pro_schedule', None)
+        return [Player(entry, self.year, pro_schedule) for entry in entries]

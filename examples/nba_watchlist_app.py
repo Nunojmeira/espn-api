@@ -11,14 +11,16 @@ python examples/nba_watchlist_app.py
 from __future__ import annotations
 
 import json
-from datetime import datetime
+from datetime import datetime, timedelta
 from pathlib import Path
 import tkinter as tk
 from tkinter import messagebox, ttk
+from functools import partial
 from typing import Any, Dict, Iterable, List, Optional, Sequence
 
 from espn_api.basketball import League
 from espn_api.basketball.player import Player
+from espn_api.utils.nba_plus_minus import get_live_plus_minus
 
 
 class NBAWatchlistApp:
@@ -36,6 +38,35 @@ class NBAWatchlistApp:
         self.team_by_label: Dict[str, int] = {}
         self.league_players: Dict[int, Dict[str, Any]] = {}
         self._tree_sort_states: Dict[Any, bool] = {}
+        self.player_columns = [
+            {"id": "player", "title": "Player", "width": 210, "anchor": tk.W, "visible": True},
+            {"id": "nba_team", "title": "NBA Team", "width": 110, "anchor": tk.CENTER, "visible": True},
+            {"id": "position", "title": "Position", "width": 100, "anchor": tk.CENTER, "visible": True},
+            {"id": "availability", "title": "Availability", "width": 190, "anchor": tk.W, "visible": True},
+            {"id": "fpts_avg", "title": "Season Avg FPts", "width": 130, "anchor": tk.CENTER, "visible": True},
+            {"id": "recent", "title": "Last 7 Avg FPts", "width": 130, "anchor": tk.CENTER, "visible": True},
+            {"id": "status", "title": "Status", "width": 160, "anchor": tk.W, "visible": True},
+        ]
+        self.watchlist_columns = [
+            {"id": "player", "title": "Player", "width": 190, "anchor": tk.W, "visible": True},
+            {"id": "availability", "title": "Availability", "width": 190, "anchor": tk.W, "visible": True},
+            {"id": "today_status", "title": "Today's Game", "width": 170, "anchor": tk.W, "visible": True},
+            {"id": "today_fpts", "title": "FPts", "width": 90, "anchor": tk.CENTER, "visible": True},
+            {"id": "today_minutes", "title": "MIN", "width": 80, "anchor": tk.CENTER, "visible": True},
+            {"id": "today_fouls", "title": "PF", "width": 70, "anchor": tk.CENTER, "visible": True},
+            {"id": "today_plus_minus", "title": "+/-", "width": 90, "anchor": tk.CENTER, "visible": True},
+            {"id": "curr_week", "title": "Current Week", "width": 170, "anchor": tk.W, "visible": True},
+            {"id": "next_week", "title": "Next Week", "width": 170, "anchor": tk.W, "visible": True},
+            {"id": "last3", "title": "Past 3 Avg", "width": 90, "anchor": tk.CENTER, "visible": True},
+            {"id": "last7", "title": "Past 7 Avg", "width": 90, "anchor": tk.CENTER, "visible": True},
+        ]
+        self.player_column_order = [column["id"] for column in self.player_columns]
+        self.watchlist_column_order = [column["id"] for column in self.watchlist_columns]
+        self.player_base_columns = list(self.player_column_order)
+        self.watchlist_base_columns = list(self.watchlist_column_order)
+        self._column_visibility_vars: Dict[str, Dict[str, tk.BooleanVar]] = {"player": {}, "watchlist": {}}
+        self._column_option_widgets: Dict[str, Dict[str, Any]] = {}
+        self._live_plus_minus_cache: Dict[int, str] = {}
 
         self._build_widgets()
 
@@ -77,6 +108,7 @@ class NBAWatchlistApp:
         self.team_combo.grid(row=0, column=1, padx=5, pady=5)
 
         ttk.Button(team_frame, text="Add Team Roster", command=self.add_selected_team).grid(row=0, column=2, padx=5, pady=5)
+        ttk.Button(team_frame, text="Import Team Watchlist", command=self.import_team_watchlist).grid(row=0, column=3, padx=5, pady=5)
 
         # Watchlist controls -------------------------------------------
         controls = ttk.LabelFrame(self.root, text="Watchlist Controls")
@@ -94,8 +126,17 @@ class NBAWatchlistApp:
         controls.columnconfigure(5, weight=1)
 
         # Main content -------------------------------------------------
-        content = ttk.Frame(self.root)
-        content.pack(fill=tk.BOTH, expand=True, padx=10, pady=5)
+        notebook = ttk.Notebook(self.root)
+        notebook.pack(fill=tk.BOTH, expand=True, padx=10, pady=5)
+
+        dashboard = ttk.Frame(notebook)
+        notebook.add(dashboard, text="Watchlist")
+
+        options_tab = ttk.Frame(notebook)
+        notebook.add(options_tab, text="Options")
+
+        content = ttk.Frame(dashboard)
+        content.pack(fill=tk.BOTH, expand=True, padx=0, pady=0)
 
         # League player directory -------------------------------------
         player_frame = ttk.LabelFrame(content, text="League Player Pool")
@@ -125,88 +166,59 @@ class NBAWatchlistApp:
         ).grid(row=0, column=3, padx=5, pady=5)
         filter_row.columnconfigure(4, weight=1)
 
-        player_columns = ("player", "nba_team", "position", "fantasy_team", "availability")
         self.player_tree = ttk.Treeview(
             player_frame,
-            columns=player_columns,
+            columns=self.player_base_columns,
             show="headings",
             height=16,
             selectmode="extended",
         )
-        player_headings = {
-            "player": "Player",
-            "nba_team": "NBA Team",
-            "position": "Position",
-            "fantasy_team": "Fantasy Team",
-            "availability": "Availability",
-        }
-        for column, title in player_headings.items():
-            self.player_tree.heading(column, text=title, command=lambda c=column: self._sort_tree(self.player_tree, c))
-            anchor = tk.W if column in {"player", "fantasy_team", "availability"} else tk.CENTER
-            width = 200 if column == "player" else 120
-            self.player_tree.column(column, anchor=anchor, width=width, stretch=False)
-        self.player_tree.column("fantasy_team", width=180)
+        for config in self.player_columns:
+            column_id = config["id"]
+            self.player_tree.heading(
+                column_id,
+                text=config["title"],
+                command=partial(self._sort_tree, self.player_tree, column_id),
+            )
+            self.player_tree.column(
+                column_id,
+                anchor=config["anchor"],
+                width=config["width"],
+                stretch=False,
+            )
 
         self.player_tree.pack(fill=tk.BOTH, expand=True, side=tk.LEFT, padx=5, pady=(0, 5))
 
-        player_scrollbar = ttk.Scrollbar(player_frame, orient=tk.VERTICAL, command=self.player_tree.yview)
-        player_scrollbar.pack(side=tk.RIGHT, fill=tk.Y, pady=(0, 5))
-        self.player_tree.configure(yscrollcommand=player_scrollbar.set)
+        player_scrollbar_y = ttk.Scrollbar(player_frame, orient=tk.VERTICAL, command=self.player_tree.yview)
+        player_scrollbar_y.pack(side=tk.RIGHT, fill=tk.Y, pady=(0, 5))
+        player_scrollbar_x = ttk.Scrollbar(player_frame, orient=tk.HORIZONTAL, command=self.player_tree.xview)
+        player_scrollbar_x.pack(side=tk.BOTTOM, fill=tk.X, padx=5)
+        self.player_tree.configure(yscrollcommand=player_scrollbar_y.set, xscrollcommand=player_scrollbar_x.set)
 
         # Watchlist table ----------------------------------------------
         watchlist = ttk.LabelFrame(content, text="Watchlist")
         watchlist.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
 
-        watchlist_columns = (
-            "player",
-            "fantasy_team",
-            "availability",
-            "today_status",
-            "today_fpts",
-            "today_minutes",
-            "today_fouls",
-            "today_plus_minus",
-            "curr_week",
-            "next_week",
-            "last3",
-            "last7",
-        )
         self.tree = ttk.Treeview(
             watchlist,
-            columns=watchlist_columns,
+            columns=self.watchlist_base_columns,
             show="headings",
             height=16,
             selectmode="extended",
         )
-        watchlist_headings = {
-            "player": "Player",
-            "fantasy_team": "Fantasy Team",
-            "availability": "Availability",
-            "today_status": "Today's Game",
-            "today_fpts": "FPts",
-            "today_minutes": "MIN",
-            "today_fouls": "PF",
-            "today_plus_minus": "+/-",
-            "curr_week": "Current Week",
-            "next_week": "Next Week",
-            "last3": "Past 3 Avg",
-            "last7": "Past 7 Avg",
-        }
-        for column, title in watchlist_headings.items():
-            self.tree.heading(column, text=title, command=lambda c=column: self._sort_tree(self.tree, c))
-            if column == "player":
-                width = 190
-                anchor = tk.W
-            elif column in {"fantasy_team", "availability", "today_status", "curr_week", "next_week"}:
-                width = 170 if column == "today_status" else 150
-                anchor = tk.W
-            elif column in {"today_fpts", "last3", "last7"}:
-                width = 90
-                anchor = tk.CENTER
-            else:
-                width = 70
-                anchor = tk.CENTER
-            self.tree.column(column, anchor=anchor, width=width, stretch=False)
+        for config in self.watchlist_columns:
+            column_id = config["id"]
+            self.tree.heading(
+                column_id,
+                text=config["title"],
+                command=partial(self._sort_tree, self.tree, column_id),
+            )
+            self.tree.column(
+                column_id,
+                anchor=config["anchor"],
+                width=config["width"],
+                stretch=False,
+            )
 
         self.tree.pack(fill=tk.BOTH, expand=True, side=tk.TOP, padx=5, pady=(0, 5))
 
@@ -216,10 +228,142 @@ class NBAWatchlistApp:
         watchlist_scroll_x.pack(side=tk.BOTTOM, fill=tk.X)
         self.tree.configure(yscrollcommand=watchlist_scroll_y.set, xscrollcommand=watchlist_scroll_x.set)
 
+        self._apply_column_settings("player")
+        self._apply_column_settings("watchlist")
+        self._build_options_tab(options_tab)
+
         # Status bar ----------------------------------------------------
         self.status_var = tk.StringVar(value="Load a league to begin.")
         status_label = ttk.Label(self.root, textvariable=self.status_var, relief=tk.SUNKEN, anchor=tk.W)
         status_label.pack(fill=tk.X, padx=10, pady=(0, 5))
+
+    def _build_options_tab(self, container: ttk.Frame) -> None:
+        description = ttk.Label(
+            container,
+            text="Customize which statistics appear in each table and the order in which they are shown.",
+            wraplength=520,
+            justify=tk.LEFT,
+        )
+        description.pack(anchor=tk.W, padx=10, pady=(10, 0))
+
+        player_options = ttk.LabelFrame(container, text="Player Pool Columns")
+        player_options.pack(fill=tk.BOTH, expand=True, padx=10, pady=10)
+        self._create_column_options_widgets(player_options, "player")
+
+        watchlist_options = ttk.LabelFrame(container, text="Watchlist Columns")
+        watchlist_options.pack(fill=tk.BOTH, expand=True, padx=10, pady=(0, 10))
+        self._create_column_options_widgets(watchlist_options, "watchlist")
+
+    def _create_column_options_widgets(self, frame: ttk.Frame, key: str) -> None:
+        frame.columnconfigure(0, weight=1)
+        frame.rowconfigure(0, weight=1)
+
+        listbox = tk.Listbox(frame, height=max(len(self._get_column_order(key)), 4), exportselection=False)
+        listbox.grid(row=0, column=0, sticky=tk.NSEW, padx=5, pady=5)
+        self._column_option_widgets.setdefault(key, {})['listbox'] = listbox
+        self._refresh_column_listbox(key)
+        if listbox.size():
+            listbox.select_set(0)
+
+        button_frame = ttk.Frame(frame)
+        button_frame.grid(row=0, column=1, sticky=tk.N, padx=5, pady=5)
+        ttk.Button(button_frame, text="Move Up", command=lambda: self._move_column(key, -1)).pack(fill=tk.X, pady=2)
+        ttk.Button(button_frame, text="Move Down", command=lambda: self._move_column(key, 1)).pack(fill=tk.X, pady=2)
+
+        visible_frame = ttk.LabelFrame(frame, text="Visible Columns")
+        visible_frame.grid(row=1, column=0, columnspan=2, sticky=tk.EW, padx=5, pady=(0, 5))
+        visible_frame.columnconfigure(0, weight=1)
+
+        for config in self._get_column_configs(key):
+            column_id = config["id"]
+            if column_id not in self._column_visibility_vars[key]:
+                self._column_visibility_vars[key][column_id] = tk.BooleanVar(value=config.get("visible", True))
+            var = self._column_visibility_vars[key][column_id]
+            ttk.Checkbutton(
+                visible_frame,
+                text=config["title"],
+                variable=var,
+                command=lambda c=column_id, table=key: self._toggle_column_visibility(table, c),
+            ).pack(anchor=tk.W, padx=5, pady=2)
+
+    def _get_column_configs(self, key: str) -> List[Dict[str, Any]]:
+        return self.player_columns if key == "player" else self.watchlist_columns
+
+    def _get_column_order(self, key: str) -> List[str]:
+        return self.player_column_order if key == "player" else self.watchlist_column_order
+
+    def _get_tree(self, key: str) -> Optional[ttk.Treeview]:
+        if key == "player":
+            return getattr(self, "player_tree", None)
+        return getattr(self, "tree", None)
+
+    def _apply_column_settings(self, key: str) -> None:
+        tree = self._get_tree(key)
+        if not tree:
+            return
+
+        order = self._get_column_order(key)
+        visible_columns = [column_id for column_id in order if self._column_is_visible(key, column_id)]
+        if not visible_columns and order:
+            visible_columns = [order[0]]
+        tree.configure(displaycolumns=visible_columns)
+
+    def _column_is_visible(self, key: str, column_id: str) -> bool:
+        if column_id not in self._column_visibility_vars[key]:
+            config = self._find_column_config(key, column_id)
+            self._column_visibility_vars[key][column_id] = tk.BooleanVar(value=config.get("visible", True))
+        return bool(self._column_visibility_vars[key][column_id].get())
+
+    def _refresh_column_listbox(self, key: str, select: Optional[int] = None) -> None:
+        listbox = self._column_option_widgets.get(key, {}).get('listbox')
+        if not listbox:
+            return
+
+        listbox.delete(0, tk.END)
+        for column_id in self._get_column_order(key):
+            config = self._find_column_config(key, column_id)
+            listbox.insert(tk.END, config["title"])
+
+        if listbox.size():
+            index = 0 if select is None else max(0, min(select, listbox.size() - 1))
+            listbox.select_clear(0, tk.END)
+            listbox.select_set(index)
+
+    def _move_column(self, key: str, direction: int) -> None:
+        listbox = self._column_option_widgets.get(key, {}).get('listbox')
+        if not listbox:
+            return
+        selection = listbox.curselection()
+        if not selection:
+            return
+        index = selection[0]
+        new_index = index + direction
+
+        order = self._get_column_order(key)
+        if new_index < 0 or new_index >= len(order):
+            return
+
+        order[index], order[new_index] = order[new_index], order[index]
+        self._refresh_column_listbox(key, select=new_index)
+        self._apply_column_settings(key)
+
+    def _toggle_column_visibility(self, key: str, column_id: str) -> None:
+        var = self._column_visibility_vars[key][column_id]
+        if not var.get():
+            remaining_visible = [cid for cid in self._get_column_order(key) if cid != column_id and self._column_is_visible(key, cid)]
+            if not remaining_visible:
+                var.set(True)
+                return
+
+        config = self._find_column_config(key, column_id)
+        config["visible"] = bool(var.get())
+        self._apply_column_settings(key)
+
+    def _find_column_config(self, key: str, column_id: str) -> Dict[str, Any]:
+        for config in self._get_column_configs(key):
+            if config["id"] == column_id:
+                return config
+        raise KeyError(column_id)
 
     # ------------------------------------------------------------------
     # Command callbacks
@@ -253,6 +397,7 @@ class NBAWatchlistApp:
             return
 
         self.league = league
+        self._live_plus_minus_cache.clear()
         self._populate_teams()
         self.watchlist_ids.clear()
         self.tree.delete(*self.tree.get_children())
@@ -268,19 +413,8 @@ class NBAWatchlistApp:
         )
 
     def add_selected_team(self) -> None:
-        if not self.league:
-            messagebox.showinfo("League Required", "Load a league before selecting a team.")
-            return
-
-        team_label = self.team_var.get()
-        if team_label not in self.team_by_label:
-            messagebox.showinfo("Select Team", "Please choose a team to import.")
-            return
-
-        team_id = self.team_by_label[team_label]
-        team = next((t for t in self.league.teams if t.team_id == team_id), None)
+        team = self._get_selected_team()
         if not team:
-            messagebox.showerror("Team Missing", "Unable to locate the selected team.")
             return
 
         added = 0
@@ -293,6 +427,53 @@ class NBAWatchlistApp:
             self.refresh_watchlist()
         else:
             self._set_status("All players from the selected roster are already on the watchlist.")
+
+    def import_team_watchlist(self) -> None:
+        team = self._get_selected_team()
+        if not team:
+            return
+
+        try:
+            players = self.league.team_watchlist(team.team_id) if self.league else []
+        except Exception as exc:  # pragma: no cover - user feedback path
+            messagebox.showerror("Watchlist Error", f"Unable to retrieve the ESPN watchlist: {exc}")
+            return
+
+        if isinstance(players, Player):
+            player_iterable = [players]
+        elif isinstance(players, list):
+            player_iterable = [player for player in players if isinstance(player, Player)]
+        else:
+            player_iterable = []
+
+        added = 0
+        for player in player_iterable:
+            if player.playerId not in self.watchlist_ids:
+                self.watchlist_ids.append(player.playerId)
+                added += 1
+
+        if added:
+            self._set_status(f"Added {added} players from {team.team_name}'s watchlist.")
+            self.refresh_watchlist()
+        else:
+            self._set_status("All players from the selected watchlist are already on the watchlist.")
+
+    def _get_selected_team(self) -> Optional[Any]:
+        if not self.league:
+            messagebox.showinfo("League Required", "Load a league before selecting a team.")
+            return None
+
+        team_label = self.team_var.get()
+        if team_label not in self.team_by_label:
+            messagebox.showinfo("Select Team", "Please choose a team to import.")
+            return None
+
+        team_id = self.team_by_label[team_label]
+        team = next((t for t in self.league.teams if t.team_id == team_id), None)
+        if not team:
+            messagebox.showerror("Team Missing", "Unable to locate the selected team.")
+            return None
+        return team
 
     def add_selected_players_from_directory(self) -> None:
         if not self.league:
@@ -451,6 +632,8 @@ class NBAWatchlistApp:
         players: Dict[int, Dict[str, Any]] = {}
         for team in self.league.teams:
             for player in team.roster:
+                avg_points = getattr(player, "avg_points", None)
+                recent_points = self._calculate_average(player, games=7)
                 players[player.playerId] = {
                     "player_id": player.playerId,
                     "name": player.name,
@@ -458,6 +641,9 @@ class NBAWatchlistApp:
                     "position": player.position,
                     "fantasy_team": team.team_name,
                     "is_free_agent": False,
+                    "avg_points": avg_points,
+                    "recent_points": recent_points,
+                    "status": self._format_player_status(player),
                 }
 
         try:
@@ -473,12 +659,18 @@ class NBAWatchlistApp:
                 "position": player.position,
                 "fantasy_team": "Free Agent",
                 "is_free_agent": True,
+                "avg_points": getattr(player, "avg_points", None),
+                "recent_points": self._calculate_average(player, games=7),
+                "status": self._format_player_status(player),
             }
             if player.playerId in players:
                 players[player.playerId]["is_free_agent"] = True
                 players[player.playerId]["name"] = player.name
                 players[player.playerId]["pro_team"] = player.proTeam
                 players[player.playerId]["position"] = player.position
+                players[player.playerId]["avg_points"] = entry["avg_points"]
+                players[player.playerId]["recent_points"] = entry["recent_points"]
+                players[player.playerId]["status"] = entry["status"]
             else:
                 players[player.playerId] = entry
 
@@ -502,14 +694,17 @@ class NBAWatchlistApp:
             if free_only and not info.get("is_free_agent"):
                 continue
 
-            availability = "Free Agent" if info.get("is_free_agent") else "Rostered"
-            values = (
-                info["name"],
-                info["pro_team"],
-                info["position"],
-                info["fantasy_team"],
-                availability,
-            )
+            availability = info.get("fantasy_team") if not info.get("is_free_agent") else "Free Agent"
+            row = {
+                "player": info["name"],
+                "nba_team": info["pro_team"],
+                "position": info["position"],
+                "availability": availability,
+                "fpts_avg": self._format_numeric(info.get("avg_points")),
+                "recent": self._format_numeric(info.get("recent_points")),
+                "status": info.get("status", "Active"),
+            }
+            values = tuple(row.get(column_id, "-") for column_id in self.player_base_columns)
             self.player_tree.insert("", tk.END, iid=str(info["player_id"]), values=values)
 
     def _populate_teams(self) -> None:
@@ -586,7 +781,7 @@ class NBAWatchlistApp:
             "is_free_agent": True,
         })
         fantasy_team = info.get("fantasy_team", "Free Agent")
-        availability = "Free Agent" if info.get("is_free_agent") or fantasy_team == "Free Agent" else "Rostered"
+        availability = fantasy_team if fantasy_team != "Free Agent" else "Free Agent"
 
         today_metrics = self._get_today_metrics(player)
         current_week = self._format_schedule(
@@ -596,32 +791,67 @@ class NBAWatchlistApp:
         )
         next_week = self._format_schedule(
             player,
-            self._get_scoring_periods(self.league.currentMatchupPeriod + 1),
+            self._get_next_week_periods(player),
             fallback="Next week's schedule unavailable.",
         )
         last3 = self._calculate_average(player, games=3)
         last7 = self._calculate_average(player, games=7)
 
-        return (
-            player.name,
-            fantasy_team,
-            availability,
-            today_metrics["status"],
-            self._format_numeric(today_metrics["points"]),
-            today_metrics["minutes"],
-            today_metrics["fouls"],
-            today_metrics["plus_minus"],
-            current_week,
-            next_week,
-            self._format_numeric(last3),
-            self._format_numeric(last7),
-        )
+        row = {
+            "player": player.name,
+            "availability": availability,
+            "today_status": today_metrics["status"],
+            "today_fpts": self._format_numeric(today_metrics["points"]),
+            "today_minutes": today_metrics["minutes"],
+            "today_fouls": today_metrics["fouls"],
+            "today_plus_minus": today_metrics["plus_minus"],
+            "curr_week": current_week,
+            "next_week": next_week,
+            "last3": self._format_numeric(last3),
+            "last7": self._format_numeric(last7),
+        }
+
+        return tuple(row.get(column_id, "-") for column_id in self.watchlist_base_columns)
 
     def _get_scoring_periods(self, matchup_period: int) -> Sequence[int]:
         if not self.league:
             return []
         periods = self.league.matchup_ids.get(matchup_period, [])
         return [int(p) for p in periods]
+
+    def _get_next_week_periods(self, player: Player) -> Sequence[int]:
+        upcoming = self._get_upcoming_periods(player, days=7)
+        if upcoming:
+            return upcoming
+        return self._get_scoring_periods(self.league.currentMatchupPeriod + 1)
+
+    def _get_upcoming_periods(self, player: Player, days: int) -> Sequence[int]:
+        if not self.league:
+            return []
+
+        now = datetime.now()
+        limit = now + timedelta(days=days)
+        upcoming: List[int] = []
+        sorted_periods = sorted(
+            (int(key) for key in player.schedule.keys() if str(key).isdigit())
+        )
+
+        for period in sorted_periods:
+            entry = player.schedule.get(str(period), {})
+            date = entry.get("date") if isinstance(entry, dict) else None
+
+            if isinstance(date, datetime):
+                if now <= date <= limit:
+                    upcoming.append(period)
+                elif date > limit and upcoming:
+                    break
+            elif period > self.league.scoringPeriodId:
+                upcoming.append(period)
+
+            if len(upcoming) >= 5:
+                break
+
+        return upcoming
 
     def _get_today_metrics(self, player: Player) -> Dict[str, Any]:
         if not self.league:
@@ -657,6 +887,8 @@ class NBAWatchlistApp:
         minutes = self._lookup_stat(totals, ("MIN", "MPG"))
         fouls = self._lookup_stat(totals, ("PF",))
         plus_minus = self._lookup_plus_minus(totals)
+        if plus_minus in {"-", ""}:
+            plus_minus = self._fetch_live_plus_minus(player)
         return {"status": status, "points": points, "minutes": minutes, "fouls": fouls, "plus_minus": plus_minus}
 
     def _calculate_average(self, player: Player, games: int) -> Optional[float]:
@@ -673,6 +905,18 @@ class NBAWatchlistApp:
         if not totals:
             return None
         return sum(totals) / len(totals)
+
+    def _format_player_status(self, player: Player) -> str:
+        parts: List[str] = []
+        status = getattr(player, "injuryStatus", "")
+        if status:
+            parts.append(status)
+        expected = getattr(player, "expected_return_date", None)
+        if expected:
+            parts.append(expected.strftime('%b %d'))
+        if not parts:
+            return "Active"
+        return " - ".join(parts)
 
     @staticmethod
     def _format_numeric(value: Optional[float]) -> str:
@@ -713,6 +957,22 @@ class NBAWatchlistApp:
             if "PLUS" in key.upper():
                 return f"{value:+.1f}" if isinstance(value, (int, float)) else str(value)
         return "-"
+
+    def _fetch_live_plus_minus(self, player: Player) -> str:
+        cached = self._live_plus_minus_cache.get(player.playerId)
+        if cached is not None:
+            return cached
+
+        display = "-"
+        try:
+            value = get_live_plus_minus(player.name)
+        except Exception:
+            value = None
+        if isinstance(value, (int, float)):
+            display = f"{value:+.1f}"
+
+        self._live_plus_minus_cache[player.playerId] = display
+        return display
 
     def _sort_tree(self, tree: ttk.Treeview, column: str) -> None:
         items = []

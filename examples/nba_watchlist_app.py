@@ -20,7 +20,13 @@ from typing import Any, Dict, Iterable, List, Optional, Sequence
 
 from espn_api.basketball import League
 from espn_api.basketball.player import Player
-from espn_api.utils.nba_plus_minus import get_live_plus_minus
+try:
+    from espn_api.utils.nba_plus_minus import get_live_plus_minus
+except ModuleNotFoundError:  # pragma: no cover - fallback for older installs
+    def get_live_plus_minus(*_args: Any, **_kwargs: Any) -> None:
+        """Fallback when the optional ``nba_plus_minus`` helper is unavailable."""
+
+        return None
 
 
 class NBAWatchlistApp:

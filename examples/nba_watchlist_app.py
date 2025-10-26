@@ -49,6 +49,7 @@ class NBAWatchlistApp:
             {"id": "nba_team", "title": "NBA Team", "width": 110, "anchor": tk.CENTER, "visible": True},
             {"id": "position", "title": "Position", "width": 100, "anchor": tk.CENTER, "visible": True},
             {"id": "availability", "title": "Availability", "width": 190, "anchor": tk.W, "visible": True},
+            {"id": "today_fpts", "title": "FPts", "width": 90, "anchor": tk.CENTER, "visible": True},
             {"id": "fpts_avg", "title": "Season Avg FPts", "width": 130, "anchor": tk.CENTER, "visible": True},
             {"id": "recent", "title": "Last 7 Avg FPts", "width": 130, "anchor": tk.CENTER, "visible": True},
             {"id": "status", "title": "Status", "width": 160, "anchor": tk.W, "visible": True},
@@ -640,6 +641,7 @@ class NBAWatchlistApp:
             for player in team.roster:
                 avg_points = getattr(player, "avg_points", None)
                 recent_points = self._calculate_average(player, games=7)
+                today_metrics = self._get_today_metrics(player)
                 players[player.playerId] = {
                     "player_id": player.playerId,
                     "name": player.name,
@@ -649,6 +651,7 @@ class NBAWatchlistApp:
                     "is_free_agent": False,
                     "avg_points": avg_points,
                     "recent_points": recent_points,
+                    "today_fpts": self._format_numeric(today_metrics.get("points")),
                     "status": self._format_player_status(player),
                 }
 
@@ -658,6 +661,7 @@ class NBAWatchlistApp:
             free_agents = []
 
         for player in free_agents:
+            today_metrics = self._get_today_metrics(player)
             entry = {
                 "player_id": player.playerId,
                 "name": player.name,
@@ -667,6 +671,7 @@ class NBAWatchlistApp:
                 "is_free_agent": True,
                 "avg_points": getattr(player, "avg_points", None),
                 "recent_points": self._calculate_average(player, games=7),
+                "today_fpts": self._format_numeric(today_metrics.get("points")),
                 "status": self._format_player_status(player),
             }
             if player.playerId in players:
@@ -676,6 +681,7 @@ class NBAWatchlistApp:
                 players[player.playerId]["position"] = player.position
                 players[player.playerId]["avg_points"] = entry["avg_points"]
                 players[player.playerId]["recent_points"] = entry["recent_points"]
+                players[player.playerId]["today_fpts"] = entry["today_fpts"]
                 players[player.playerId]["status"] = entry["status"]
             else:
                 players[player.playerId] = entry
@@ -706,6 +712,7 @@ class NBAWatchlistApp:
                 "nba_team": info["pro_team"],
                 "position": info["position"],
                 "availability": availability,
+                "today_fpts": info.get("today_fpts", "-"),
                 "fpts_avg": self._format_numeric(info.get("avg_points")),
                 "recent": self._format_numeric(info.get("recent_points")),
                 "status": info.get("status", "Active"),

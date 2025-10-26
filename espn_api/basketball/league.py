@@ -250,9 +250,15 @@ class League(BaseLeague):
                     if isinstance(current.get('teamId'), int):
                         team_value = current['teamId']
 
-                    if include_children and 'player' in current and isinstance(current['player'], dict):
-                        entries.append((team_value, current))
-                        continue
+                    if include_children:
+                        player_payload = current.get('player')
+                        player_pool_entry = current.get('playerPoolEntry')
+                        if isinstance(player_payload, dict) or (
+                            isinstance(player_pool_entry, dict)
+                            and isinstance(player_pool_entry.get('player'), dict)
+                        ):
+                            entries.append((team_value, current))
+                            continue
 
                     for key, value in current.items():
                         if not isinstance(value, (dict, list)):
@@ -310,6 +316,10 @@ class League(BaseLeague):
                 continue
 
             player_payload = entry.get('player') if isinstance(entry, dict) else None
+            if not isinstance(player_payload, dict) and isinstance(entry, dict):
+                player_pool_entry = entry.get('playerPoolEntry')
+                if isinstance(player_pool_entry, dict):
+                    player_payload = player_pool_entry.get('player')
             if not isinstance(player_payload, dict):
                 continue
 
@@ -327,6 +337,10 @@ class League(BaseLeague):
             # If nothing matched the requested team, fall back to the first ``size`` entries.
             for _entry_team, entry in entries_with_team:
                 player_payload = entry.get('player') if isinstance(entry, dict) else None
+                if not isinstance(player_payload, dict) and isinstance(entry, dict):
+                    player_pool_entry = entry.get('playerPoolEntry')
+                    if isinstance(player_pool_entry, dict):
+                        player_payload = player_pool_entry.get('player')
                 if not isinstance(player_payload, dict):
                     continue
 

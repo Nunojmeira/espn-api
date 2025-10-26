@@ -10,9 +10,11 @@ python examples/nba_watchlist_app.py
 
 from __future__ import annotations
 
+import json
+from datetime import datetime
+from pathlib import Path
 import tkinter as tk
 from tkinter import messagebox, ttk
-from datetime import datetime
 from typing import Any, Dict, Iterable, List, Optional, Sequence
 
 from espn_api.basketball import League
@@ -26,6 +28,8 @@ class NBAWatchlistApp:
         self.root = root
         self.root.title("ESPN NBA Fantasy Watchlist")
         self.root.geometry("1280x620")
+
+        self._saved_preferences = self._load_saved_preferences()
 
         self.league: Optional[League] = None
         self.watchlist_ids: List[int] = []
@@ -43,19 +47,20 @@ class NBAWatchlistApp:
         connection.pack(fill=tk.X, padx=10, pady=5)
 
         ttk.Label(connection, text="League ID:").grid(row=0, column=0, padx=5, pady=5, sticky=tk.W)
-        self.league_id_var = tk.StringVar()
+        self.league_id_var = tk.StringVar(value=self._saved_preferences.get("league_id", ""))
         ttk.Entry(connection, width=12, textvariable=self.league_id_var).grid(row=0, column=1, padx=5, pady=5)
 
         ttk.Label(connection, text="Season Year:").grid(row=0, column=2, padx=5, pady=5, sticky=tk.W)
-        self.year_var = tk.StringVar(value=str(datetime.now().year))
+        default_year = self._saved_preferences.get("year") or str(datetime.now().year)
+        self.year_var = tk.StringVar(value=default_year)
         ttk.Entry(connection, width=8, textvariable=self.year_var).grid(row=0, column=3, padx=5, pady=5)
 
         ttk.Label(connection, text="espn_s2 (optional):").grid(row=1, column=0, padx=5, pady=5, sticky=tk.W)
-        self.espn_s2_var = tk.StringVar()
+        self.espn_s2_var = tk.StringVar(value=self._saved_preferences.get("espn_s2", ""))
         ttk.Entry(connection, width=40, textvariable=self.espn_s2_var).grid(row=1, column=1, columnspan=3, padx=5, pady=5, sticky=tk.W)
 
         ttk.Label(connection, text="SWID (optional):").grid(row=2, column=0, padx=5, pady=5, sticky=tk.W)
-        self.swid_var = tk.StringVar()
+        self.swid_var = tk.StringVar(value=self._saved_preferences.get("swid", ""))
         ttk.Entry(connection, width=40, textvariable=self.swid_var).grid(row=2, column=1, columnspan=3, padx=5, pady=5, sticky=tk.W)
 
         ttk.Button(connection, text="Load League", command=self.load_league).grid(row=0, column=4, rowspan=3, padx=10, pady=5, sticky=tk.N+tk.S)
@@ -255,6 +260,12 @@ class NBAWatchlistApp:
         self._collect_league_players()
         self._populate_player_directory()
         self._set_status("League loaded. Add players or import a roster to begin.")
+        self._save_preferences(
+            league_id=league_id,
+            year=year,
+            espn_s2=espn_s2,
+            swid=swid,
+        )
 
     def add_selected_team(self) -> None:
         if not self.league:
@@ -400,6 +411,38 @@ class NBAWatchlistApp:
     # ------------------------------------------------------------------
     # Helper methods
     # ------------------------------------------------------------------
+    def _preferences_path(self) -> Path:
+        return Path.home() / ".espn_nba_watchlist.json"
+
+    def _load_saved_preferences(self) -> Dict[str, str]:
+        path = self._preferences_path()
+        try:
+            with path.open("r", encoding="utf-8") as handle:
+                data = json.load(handle)
+            if isinstance(data, dict):
+                return {k: str(v) for k, v in data.items() if isinstance(k, str)}
+        except FileNotFoundError:
+            return {}
+        except (OSError, json.JSONDecodeError):
+            return {}
+        return {}
+
+    def _save_preferences(self, *, league_id: str, year: str, espn_s2: str, swid: str) -> None:
+        data = {
+            "league_id": league_id,
+            "year": year,
+        }
+        if espn_s2:
+            data["espn_s2"] = espn_s2
+        if swid:
+            data["swid"] = swid
+
+        path = self._preferences_path()
+        try:
+            path.write_text(json.dumps(data, indent=2), encoding="utf-8")
+        except OSError:
+            pass
+
     def _collect_league_players(self) -> None:
         if not self.league:
             self.league_players = {}

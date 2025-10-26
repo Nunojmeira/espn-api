@@ -1222,18 +1222,21 @@ class NBAWatchlistApp:
         self._tree_sort_states[key] = not reverse
 
     @staticmethod
-    def _coerce_sort_value(value: Any) -> Any:
+    def _coerce_sort_value(value: Any) -> Tuple[int, Any]:
         if value is None:
-            return ""
+            return (2, "")
         if isinstance(value, str):
             stripped = value.strip()
             if not stripped or stripped == "-":
-                return ""
+                return (2, "")
             try:
-                return float(stripped.replace("+", ""))
+                numeric = float(stripped.replace("+", ""))
             except ValueError:
-                return stripped.lower()
-        return value
+                return (1, stripped.lower())
+            return (0, numeric)
+        if isinstance(value, (int, float)):
+            return (0, float(value))
+        return (1, str(value).lower())
 
     def _set_status(self, message: str) -> None:
         self.status_var.set(message)

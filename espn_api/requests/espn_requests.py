@@ -2,7 +2,7 @@ import requests
 import json
 from .constant import FANTASY_BASE_ENDPOINT, NEWS_BASE_ENDPOINT, FANTASY_SPORTS
 from ..utils.logger import Logger
-from typing import List
+from typing import List, Union
 
 
 class ESPNAccessDenied(Exception):
@@ -18,7 +18,15 @@ class ESPNUnknownError(Exception):
 
 
 class EspnFantasyRequests(object):
-    def __init__(self, sport: str, year: int, league_id: int, cookies: dict = None, logger: Logger = None):
+    def __init__(
+        self,
+        sport: str,
+        year: int,
+        league_id: int,
+        cookies: dict = None,
+        logger: Logger = None,
+        timeout: Union[float, tuple, None] = 10,
+    ):
         if sport not in FANTASY_SPORTS:
             raise Exception(f'Unknown sport: {sport}, available options are {FANTASY_SPORTS.keys()}')
         self.year = year
@@ -28,6 +36,7 @@ class EspnFantasyRequests(object):
         self.NEWS_ENDPOINT = NEWS_BASE_ENDPOINT + FANTASY_SPORTS[sport] + '/news/' + 'players'
         self.cookies = cookies
         self.logger = logger
+        self.timeout = timeout
 
         self.LEAGUE_ENDPOINT = FANTASY_BASE_ENDPOINT + FANTASY_SPORTS[sport]
         # older season data is stored at a different endpoint
@@ -49,7 +58,13 @@ class EspnFantasyRequests(object):
                 self.LEAGUE_ENDPOINT = f"{base_endpoint}/leagueHistory/{self.league_id}?seasonId={self.year}"
 
             #try the alternate endpoint
-            r = requests.get(self.LEAGUE_ENDPOINT + extend, params=params, headers=headers, cookies=self.cookies)
+            r = requests.get(
+                self.LEAGUE_ENDPOINT + extend,
+                params=params,
+                headers=headers,
+                cookies=self.cookies,
+                timeout=self.timeout,
+            )
 
             if r.status_code == 200:
                 # Return the updated response if alternate works
@@ -72,7 +87,13 @@ class EspnFantasyRequests(object):
 
     def league_get(self, params: dict = None, headers: dict = None, extend: str = ''):
         endpoint = self.LEAGUE_ENDPOINT + extend
-        r = requests.get(endpoint, params=params, headers=headers, cookies=self.cookies)
+        r = requests.get(
+            endpoint,
+            params=params,
+            headers=headers,
+            cookies=self.cookies,
+            timeout=self.timeout,
+        )
         alternate_response = self.checkRequestStatus(r.status_code, extend=extend, params=params, headers=headers)
 
 
@@ -85,7 +106,13 @@ class EspnFantasyRequests(object):
 
     def get(self, params: dict = None, headers: dict = None, extend: str = ''):
         endpoint = self.ENDPOINT + extend
-        r = requests.get(endpoint, params=params, headers=headers, cookies=self.cookies)
+        r = requests.get(
+            endpoint,
+            params=params,
+            headers=headers,
+            cookies=self.cookies,
+            timeout=self.timeout,
+        )
         self.checkRequestStatus(r.status_code)
 
         if self.logger:
@@ -94,7 +121,13 @@ class EspnFantasyRequests(object):
 
     def news_get(self, params: dict = None, headers: dict = None, extend: str = ''):
         endpoint = self.NEWS_ENDPOINT + extend
-        r = requests.get(endpoint, params=params, headers=headers, cookies=self.cookies)
+        r = requests.get(
+            endpoint,
+            params=params,
+            headers=headers,
+            cookies=self.cookies,
+            timeout=self.timeout,
+        )
 
         if self.logger:
             self.logger.log_request(endpoint=endpoint, params=params, headers=headers, response=r.json())
@@ -196,7 +229,13 @@ class EspnFantasyRequests(object):
         }
         headers = {'x-fantasy-filter': json.dumps(filters)}
 
-        response = requests.get(endpoint, params=params, headers=headers, cookies=self.cookies, timeout=20)
+        response = requests.get(
+            endpoint,
+            params=params,
+            headers=headers,
+            cookies=self.cookies,
+            timeout=self.timeout,
+        )
 
         if response.status_code == 401:
             raise ESPNAccessDenied(

@@ -1,7 +1,8 @@
 from unittest import mock, TestCase
 import requests_mock
 import io
-from espn_api.requests.espn_requests import EspnFantasyRequests
+import json
+from espn_api.requests.espn_requests import EspnFantasyRequests, ESPNAccessDenied
 
 class EspnRequestsTest(TestCase):
 
@@ -10,6 +11,41 @@ class EspnRequestsTest(TestCase):
     def test_stub(self, mock_request, mock_stdout):
         url_api_key = 'https://registerdisney.go.com/jgc/v5/client/ESPN-FANTASYLM-PROD/api-key?langPref=en-US'
         mock_request.post(url_api_key, status_code=400)
+
+    @requests_mock.Mocker()
+    def test_get_watchlist_players(self, mock_request):
+        cookies = {'espn_s2': 'token', 'SWID': '{1234-5678}'}
+        request = EspnFantasyRequests(sport='nba', league_id=987654, year=2024, cookies=cookies)
+
+        url = 'https://lm-api-reads.fantasy.espn.com/apis/v3/games/fba/seasons/2024/segments/0/leagues/987654/players'
+        payload = {
+            'players': [
+                {
+                    'player': {'id': 1, 'fullName': 'Watchlist Player'},
+                    'playerId': 1,
+                }
+            ]
+        }
+
+        mock_request.get(url, status_code=200, json=payload)
+
+        entries = request.get_watchlist_players(season_id=2024, limit=25, offset=10)
+
+        self.assertEqual(entries, payload['players'])
+        last_request = mock_request.last_request
+        self.assertIsNotNone(last_request)
+        self.assertEqual(last_request.qs.get('view'), ['kona_player_info'])
+
+        filters = json.loads(last_request.headers['x-fantasy-filter'])
+        self.assertEqual(filters['players']['limit'], 25)
+        self.assertEqual(filters['players']['offset'], 10)
+        self.assertTrue(filters['players']['filterWatchList']['value'])
+
+    def test_get_watchlist_players_requires_cookies(self):
+        request = EspnFantasyRequests(sport='nba', league_id=123456, year=2024)
+
+        with self.assertRaises(ESPNAccessDenied):
+            request.get_watchlist_players()
 
     # @requests_mock.Mocker()
     # @mock.patch('sys.stdout', new_callable=io.StringIO)

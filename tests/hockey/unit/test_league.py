@@ -44,6 +44,22 @@ class BaseLeagueTest(TestCase):
         self.assertEqual(self.league.player_map[2555315], 'Charlie  Coyle')
         mock_get_players.assert_called_once()
 
+    @mock.patch.object(EspnFantasyRequests, 'get_pro_players')
+    def test_base_league_fetch_players_nested_payload(self, mock_get_players):
+        with open('tests/hockey/unit/data/player_data.json') as data:
+            player_data = json.loads(data.read())
+
+        nested_payload = {
+            'players': [{'player': player_data[0]}, {'player': player_data[1]}]
+        }
+
+        mock_get_players.return_value = nested_payload
+
+        self.league._fetch_players()
+
+        self.assertEqual(self.league.player_map[player_data[0]['fullName']], player_data[0]['id'])
+        self.assertEqual(self.league.player_map[player_data[1]['id']], player_data[1]['fullName'])
+
     @mock.patch.object(EspnFantasyRequests, 'get_pro_schedule')
     def test_base_league_fetch_schedule(self, mock_get_pro_schedule):
         with open('tests/hockey/unit/data/pro_schedule.json') as data:

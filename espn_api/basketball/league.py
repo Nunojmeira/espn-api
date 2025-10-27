@@ -212,6 +212,147 @@ class League(BaseLeague):
                 news[id] = self.espn_request.get_player_news(id)
 
         if len(data['players']) == 1:
-            return Player(data['players'][0], self.year, self.pro_schedule, news=news.get(playerId[0], []) if include_news else None)
+            return Player(
+                data['players'][0],
+                self.year,
+                self.pro_schedule,
+                news=news.get(playerId[0], []) if include_news else None,
+            )
         if len(data['players']) > 1:
-            return [Player(player, self.year, self.pro_schedule, news=news.get(player['id'], []) if include_news else None) for player in data['players']]
+            return [
+                Player(
+                    player,
+                    self.year,
+                    self.pro_schedule,
+                    news=news.get(player['id'], []) if include_news else None,
+                )
+                for player in data['players']
+            ]
+
+    def team_watchlist(self, team_id: int, size: int = 40) -> List[Player]:
+        """Return the players that belong to the selected team's ESPN watchlist."""
+
+        if self.year < 2019:
+            raise Exception('Cant use watchlist before 2019')
+
+        params = {'view': 'player_wl'}
+        data = self.espn_request.league_get(params=params)
+
+        def _collect_watchlist_entries(node):
+            entries = []
+            stack = [(node, False, None)]
+
+            while stack:
+                current, include_children, current_team = stack.pop()
+
+                if isinstance(current, dict):
+                    team_value = current_team
+                    if isinstance(current.get('teamId'), int):
+                        team_value = current['teamId']
+
+                    if include_children:
+                        player_payload = current.get('player')
+                        player_pool_entry = current.get('playerPoolEntry')
+                        if isinstance(player_payload, dict) or (
+                            isinstance(player_pool_entry, dict)
+                            and isinstance(player_pool_entry.get('player'), dict)
+                        ):
+                            entries.append((team_value, current))
+                            continue
+
+                    for key, value in current.items():
+                        if not isinstance(value, (dict, list)):
+                            continue
+
+                        key_lower = key.lower() if isinstance(key, str) else ''
+                        next_include = include_children or 'watch' in key_lower
+                        stack.append((value, next_include, team_value))
+
+                elif isinstance(current, list):
+                    for item in current:
+                        if isinstance(item, (dict, list)):
+                            stack.append((item, include_children, current_team))
+
+            return entries
+
+        entries_with_team = []
+        if isinstance(data, dict) and data:
+            entries_with_team = _collect_watchlist_entries(data)
+
+        has_player_watchlist_key = isinstance(data, dict) and 'playerWatchList' in data
+
+        if not entries_with_team and not has_player_watchlist_key:
+            # Fallback to the legacy view for older responses.
+            params = {'view': 'mWatchlist'}
+            filters = {
+                "players": {
+                    "filterTeamIds": {"value": [team_id]},
+                    "limit": size,
+                }
+            }
+            headers = {'x-fantasy-filter': json.dumps(filters)}
+            data = self.espn_request.league_get(params=params, headers=headers)
+            if isinstance(data, dict):
+                if isinstance(data.get('players'), list):
+                    entries_with_team = [(team_id, entry) for entry in data['players'] if isinstance(entry, dict)]
+                elif isinstance(data.get('watchlist'), dict):
+                    watchlist = data['watchlist']
+                    if isinstance(watchlist.get('players'), list):
+                        entries_with_team = [(team_id, entry) for entry in watchlist['players'] if isinstance(entry, dict)]
+
+        # If we still have no entries try the straightforward keys from the primary response.
+        if not entries_with_team and isinstance(data, dict):
+            if isinstance(data.get('players'), list):
+                entries_with_team = [(None, entry) for entry in data['players'] if isinstance(entry, dict)]
+            elif isinstance(data.get('watchlist'), dict):
+                watchlist = data['watchlist']
+                if isinstance(watchlist.get('players'), list):
+                    entries_with_team = [(None, entry) for entry in watchlist['players'] if isinstance(entry, dict)]
+
+        selected_entries = []
+        seen_player_ids = set()
+        for entry_team, entry in entries_with_team:
+            if team_id is not None and entry_team is not None and entry_team != team_id:
+                continue
+
+            player_payload = entry.get('player') if isinstance(entry, dict) else None
+            if not isinstance(player_payload, dict) and isinstance(entry, dict):
+                player_pool_entry = entry.get('playerPoolEntry')
+                if isinstance(player_pool_entry, dict):
+                    player_payload = player_pool_entry.get('player')
+            if not isinstance(player_payload, dict):
+                continue
+
+            player_id = entry.get('playerId') or player_payload.get('id')
+            if player_id in seen_player_ids:
+                continue
+
+            seen_player_ids.add(player_id)
+            selected_entries.append(entry)
+
+            if len(selected_entries) >= size:
+                break
+
+        if not selected_entries and team_id is not None:
+            # If nothing matched the requested team, fall back to the first ``size`` entries.
+            for _entry_team, entry in entries_with_team:
+                player_payload = entry.get('player') if isinstance(entry, dict) else None
+                if not isinstance(player_payload, dict) and isinstance(entry, dict):
+                    player_pool_entry = entry.get('playerPoolEntry')
+                    if isinstance(player_pool_entry, dict):
+                        player_payload = player_pool_entry.get('player')
+                if not isinstance(player_payload, dict):
+                    continue
+
+                player_id = entry.get('playerId') or player_payload.get('id')
+                if player_id in seen_player_ids:
+                    continue
+
+                seen_player_ids.add(player_id)
+                selected_entries.append(entry)
+
+                if len(selected_entries) >= size:
+                    break
+
+        pro_schedule = getattr(self, 'pro_schedule', None)
+        return [Player(entry, self.year, pro_schedule) for entry in selected_entries]

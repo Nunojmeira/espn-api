@@ -88,13 +88,29 @@ class BaseLeague(ABC):
 
     def _fetch_players(self):
         data = self.espn_request.get_pro_players()
-        # Map all player id's to player name
-        for player in data:
+
+        # Support both legacy (list of player dicts) and the new response
+        # shape returned by ESPN which nests players inside a "players"
+        # collection with player details stored under the "player" key.
+        if isinstance(data, dict):
+            players = data.get('players', [])
+        else:
+            players = data
+
+        for entry in players:
+            player_data = entry.get('player', entry) if isinstance(entry, dict) else entry
+
+            player_id = player_data.get('id')
+            player_name = player_data.get('fullName')
+
+            if not player_id or not player_name:
+                continue
+
             # two way map to find playerId's by name
-            self.player_map[player['id']] = player['fullName']
+            self.player_map[player_id] = player_name
             # if two players have the same fullname use first one for now TODO update for multiple player names
-            if player['fullName'] not in self.player_map:
-                self.player_map[player['fullName']] = player['id']
+            if player_name not in self.player_map:
+                self.player_map[player_name] = player_id
 
     def _get_pro_schedule(self, scoringPeriodId: int = None):
         data = self.espn_request.get_pro_schedule()

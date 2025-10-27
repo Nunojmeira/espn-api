@@ -79,10 +79,28 @@ the league.
 
 ### Syncing an ESPN Watchlist
 
-Private watchlists require the authenticated user's ESPN cookies. When you
-create a `League` instance, supply the `espn_s2` and `SWID` values that belong
-to the signed-in ESPN account. Store these tokens securely on a per-user basis
-and encrypt them if you persist them in a database.
+Private watchlists require the authenticated user's ESPN cookies. Follow these
+steps to mirror your online watchlist inside the desktop application:
+
+1. **Capture your ESPN cookies.** Sign in to fantasy.espn.com, open your
+   browser's developer tools, and copy the values of the `SWID` (including the
+   braces) and `espn_s2` cookies. Keep them secret—they grant access to your
+   private league data.
+2. **Launch the watchlist app.** From this repository, run
+   `python examples/nba_watchlist_app.py` (or double-click the file on Windows)
+   to open the Tkinter UI.
+3. **Enter your league credentials.** In the **League Connection** panel,
+   provide the league ID and season year for the league you want to sync, then
+   paste your `espn_s2` and `SWID` cookie values into the optional fields.
+4. **Load the league.** Click **Load League**. If the cookies are valid the
+   app will fetch private data such as team rosters and your saved watchlist.
+5. **Sync the watchlist.** Choose your fantasy team from the **League Teams**
+   drop-down and click **Import Team Watchlist**. You can refresh the data at
+   any time via the **Refresh Watchlist** button in the **Watchlist Controls**
+   section.
+
+For custom scripts you can access the same data directly through the API.
+Instantiate a `League` with your cookies and call `watchlist_players()`:
 
 ```python
 from espn_api.basketball import League

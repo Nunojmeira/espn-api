@@ -77,6 +77,49 @@ The app supports authenticated private leagues by providing `espn_s2` and
 `SWID` cookies within the UI and offers quick roster imports for any team in
 the league.
 
+### Syncing an ESPN Watchlist
+
+Private watchlists require the authenticated user's ESPN cookies. Follow these
+steps to mirror your online watchlist inside the desktop application:
+
+1. **Capture your ESPN cookies.** Sign in to fantasy.espn.com, open your
+   browser's developer tools, and copy the values of the `SWID` (including the
+   braces) and `espn_s2` cookies. Keep them secret—they grant access to your
+   private league data.
+2. **Launch the watchlist app.** From this repository, run
+   `python examples/nba_watchlist_app.py` (or double-click the file on Windows)
+   to open the Tkinter UI.
+3. **Enter your league credentials.** In the **League Connection** panel,
+   provide the league ID and season year for the league you want to sync, then
+   paste your `espn_s2` and `SWID` cookie values into the optional fields.
+4. **Load the league.** Click **Load League**. If the cookies are valid the
+   app will fetch private data such as team rosters and your saved watchlist.
+5. **Sync the watchlist.** Choose your fantasy team from the **League Teams**
+   drop-down and click **Import Team Watchlist**. You can refresh the data at
+   any time via the **Refresh Watchlist** button in the **Watchlist Controls**
+   section.
+
+For custom scripts you can access the same data directly through the API.
+Instantiate a `League` with your cookies and call `watchlist_players()`:
+
+```python
+from espn_api.basketball import League
+
+league = League(
+    league_id=58624887,
+    year=2024,
+    espn_s2='YOUR_ESPNS2_TOKEN',
+    swid='{YOUR-SWID}',
+)
+
+players = league.watchlist_players()
+```
+
+For NBA and WNBA leagues the API sometimes publishes the watchlist under the
+following calendar year. The `watchlist_players` helper automatically checks the
+next season when necessary, or you can pass explicit `season_ids` if you prefer
+to control the lookup manually.
+
 
 ## [Discussions](https://github.com/cwendt94/espn-api/discussions) (new)
 If you have any questions about the package, ESPN API data, or want to talk about a feature please start a [discussion](https://github.com/cwendt94/espn-api/discussions)! 

@@ -11,12 +11,17 @@ python examples/nba_watchlist_app.py
 from __future__ import annotations
 
 import json
+import sys
 from datetime import datetime, timedelta
 from pathlib import Path
 import tkinter as tk
 from tkinter import messagebox, ttk
 from functools import partial
 from typing import Any, Dict, Iterable, List, Optional, Sequence, Tuple
+
+PROJECT_ROOT = Path(__file__).resolve().parents[1]
+if str(PROJECT_ROOT) not in sys.path:
+    sys.path.insert(0, str(PROJECT_ROOT))
 
 from espn_api.basketball import League
 from espn_api.basketball.player import Player

@@ -23,6 +23,7 @@ class EspnFantasyRequests(object):
             raise Exception(f'Unknown sport: {sport}, available options are {FANTASY_SPORTS.keys()}')
         self.year = year
         self.league_id = league_id
+        self.sport = sport
         self.ENDPOINT = FANTASY_BASE_ENDPOINT + FANTASY_SPORTS[sport] + '/seasons/' + str(self.year)
         self.NEWS_ENDPOINT = NEWS_BASE_ENDPOINT + FANTASY_SPORTS[sport] + '/news/' + 'players'
         self.cookies = cookies
@@ -169,6 +170,70 @@ class EspnFantasyRequests(object):
         params = {'playerId': playerId}
         data = self.news_get(params=params)
         return data
+
+    def get_watchlist_players(self, season_id: int = None, limit: int = 2000, offset: int = 0):
+        """Fetch the authenticated user's watchlist entries for the given season."""
+
+        season = season_id if season_id is not None else self.year
+        if season < 2018:
+            raise Exception('Cant use watchlist before 2018')
+
+        if not self.cookies or 'espn_s2' not in self.cookies or 'SWID' not in self.cookies:
+            raise ESPNAccessDenied('espn_s2 and swid are required')
+
+        endpoint = (
+            f"{FANTASY_BASE_ENDPOINT}{FANTASY_SPORTS[self.sport]}"
+            f"/seasons/{season}/segments/0/leagues/{self.league_id}/players"
+        )
+
+        params = {'view': 'kona_player_info'}
+        filters = {
+            'players': {
+                'filterWatchList': {'value': True},
+                'limit': limit,
+                'offset': offset,
+            }
+        }
+        headers = {'x-fantasy-filter': json.dumps(filters)}
+
+        response = requests.get(endpoint, params=params, headers=headers, cookies=self.cookies, timeout=20)
+
+        if response.status_code == 401:
+            raise ESPNAccessDenied(
+                f"League {self.league_id} cannot be accessed with espn_s2={self.cookies.get('espn_s2')} "
+                f"and swid={self.cookies.get('SWID')}"
+            )
+        if response.status_code == 404:
+            raise ESPNInvalidLeague(f"League {self.league_id} does not exist")
+        if response.status_code != 200:
+            raise ESPNUnknownError(f"ESPN returned an HTTP {response.status_code}")
+
+        payload = response.json()
+        if isinstance(payload, list):
+            raw_entries = payload
+        elif isinstance(payload, dict):
+            if isinstance(payload.get('players'), list):
+                raw_entries = payload['players']
+            elif isinstance(payload.get('watchlist'), dict):
+                watchlist = payload['watchlist']
+                players = watchlist.get('players') if isinstance(watchlist, dict) else []
+                raw_entries = players if isinstance(players, list) else []
+            elif isinstance(payload.get('playerWatchList'), dict):
+                watch_data = payload['playerWatchList']
+                raw_entries = []
+                watchlists = watch_data.get('watchlists') if isinstance(watch_data, dict) else []
+                if isinstance(watchlists, list):
+                    for watchlist in watchlists:
+                        if isinstance(watchlist, dict):
+                            entries = watchlist.get('entries')
+                            if isinstance(entries, list):
+                                raw_entries.extend(entry for entry in entries if isinstance(entry, dict))
+            else:
+                raw_entries = []
+        else:
+            raw_entries = []
+
+        return raw_entries
 
     # Username and password no longer works using their API without using google recaptcha
     # Possibly revisit in future if anything changes

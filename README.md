@@ -77,6 +77,31 @@ The app supports authenticated private leagues by providing `espn_s2` and
 `SWID` cookies within the UI and offers quick roster imports for any team in
 the league.
 
+### Syncing an ESPN Watchlist
+
+Private watchlists require the authenticated user's ESPN cookies. When you
+create a `League` instance, supply the `espn_s2` and `SWID` values that belong
+to the signed-in ESPN account. Store these tokens securely on a per-user basis
+and encrypt them if you persist them in a database.
+
+```python
+from espn_api.basketball import League
+
+league = League(
+    league_id=58624887,
+    year=2024,
+    espn_s2='YOUR_ESPNS2_TOKEN',
+    swid='{YOUR-SWID}',
+)
+
+players = league.watchlist_players()
+```
+
+For NBA and WNBA leagues the API sometimes publishes the watchlist under the
+following calendar year. The `watchlist_players` helper automatically checks the
+next season when necessary, or you can pass explicit `season_ids` if you prefer
+to control the lookup manually.
+
 
 ## [Discussions](https://github.com/cwendt94/espn-api/discussions) (new)
 If you have any questions about the package, ESPN API data, or want to talk about a feature please start a [discussion](https://github.com/cwendt94/espn-api/discussions)! 

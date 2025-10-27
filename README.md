@@ -60,6 +60,7 @@ from espn_api.hockey import League
 # Baseball API
 from espn_api.baseball import League
 # Init
+<<<<<<< HEAD
 league = League(league_id=222, year=2019)
 ```
 
@@ -119,6 +120,24 @@ For NBA and WNBA leagues the API sometimes publishes the watchlist under the
 following calendar year. The `watchlist_players` helper automatically checks the
 next season when necessary, or you can pass explicit `season_ids` if you prefer
 to control the lookup manually.
+=======
+league = League(league_id=222, year=2019)
+```
+
+### Windows NBA Watchlist App
+
+The repository includes an example Tkinter desktop application that can be
+run on Windows (or any OS with Python 3) to track NBA fantasy player stats,
+view schedules, and maintain a customizable watchlist.
+
+```bash
+python examples/nba_watchlist_app.py
+```
+
+The app supports authenticated private leagues by providing `espn_s2` and
+`SWID` cookies within the UI and offers quick roster imports for any team in
+the league.
+>>>>>>> parent of 86e023e (Add API helpers for authenticated watchlist sync)
 
 
 ## [Discussions](https://github.com/cwendt94/espn-api/discussions) (new)

@@ -17,20 +17,6 @@ class FakeRequest:
         return self.responses.pop(0)
 
 
-class WatchlistRequestStub:
-    def __init__(self, responses, sport='nba'):
-        self.responses = list(responses)
-        self.calls = []
-        self.sport = sport
-        self.cookies = {'espn_s2': 'token', 'SWID': '{1234-5678}'}
-
-    def get_watchlist_players(self, season_id, limit, offset):
-        self.calls.append((season_id, limit, offset))
-        if not self.responses:
-            return []
-        return self.responses.pop(0)
-
-
 class LeagueWatchlistTest(TestCase):
     def test_team_watchlist_returns_players(self):
         league = League(league_id=123456, year=2024, fetch_league=False)
@@ -198,60 +184,3 @@ class LeagueWatchlistTest(TestCase):
         params, headers = fake_request.calls[0]
         self.assertEqual(params, {'view': 'player_wl'})
         self.assertIsNone(headers)
-
-    def test_watchlist_players_attempts_future_season(self):
-        league = League(league_id=246810, year=2024, fetch_league=False)
-        league.pro_schedule = {}
-
-        empty_response = []
-        watchlist_entry = [
-            {
-                'player': {
-                    'id': 555,
-                    'fullName': 'Future Guard',
-                    'defaultPositionId': 1,
-                    'eligibleSlots': [0, 1],
-                    'proTeamId': 2,
-                    'injuryStatus': 'ACTIVE',
-                    'stats': [],
-                },
-                'playerId': 555,
-            }
-        ]
-
-        stub = WatchlistRequestStub([empty_response, watchlist_entry])
-        league.espn_request = stub
-
-        players = league.watchlist_players(limit=5, offset=15)
-
-        self.assertEqual(len(players), 1)
-        self.assertEqual(players[0].name, 'Future Guard')
-        self.assertEqual(stub.calls, [(2024, 5, 15), (2025, 5, 15)])
-
-    def test_watchlist_players_uses_custom_season_ids(self):
-        league = League(league_id=13579, year=2024, fetch_league=False)
-        league.pro_schedule = {}
-
-        entry = [
-            {
-                'player': {
-                    'id': 42,
-                    'fullName': 'Custom Season Player',
-                    'defaultPositionId': 4,
-                    'eligibleSlots': [4],
-                    'proTeamId': 10,
-                    'injuryStatus': 'ACTIVE',
-                    'stats': [],
-                },
-                'playerId': 42,
-            }
-        ]
-
-        stub = WatchlistRequestStub([entry])
-        league.espn_request = stub
-
-        players = league.watchlist_players(limit=3, offset=0, season_ids=[2030])
-
-        self.assertEqual(len(players), 1)
-        self.assertEqual(players[0].name, 'Custom Season Player')
-        self.assertEqual(stub.calls, [(2030, 3, 0)])

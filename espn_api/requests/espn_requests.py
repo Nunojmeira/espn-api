@@ -29,6 +29,7 @@ class EspnFantasyRequests(object):
     ):
         if sport not in FANTASY_SPORTS:
             raise Exception(f'Unknown sport: {sport}, available options are {FANTASY_SPORTS.keys()}')
+<<<<<<< HEAD
         self.year = year
         self.league_id = league_id
         self.sport = sport
@@ -37,6 +38,14 @@ class EspnFantasyRequests(object):
         self.cookies = cookies
         self.logger = logger
         self.timeout = timeout
+=======
+        self.year = year
+        self.league_id = league_id
+        self.ENDPOINT = FANTASY_BASE_ENDPOINT + FANTASY_SPORTS[sport] + '/seasons/' + str(self.year)
+        self.NEWS_ENDPOINT = NEWS_BASE_ENDPOINT + FANTASY_SPORTS[sport] + '/news/' + 'players'
+        self.cookies = cookies
+        self.logger = logger
+>>>>>>> parent of 86e023e (Add API helpers for authenticated watchlist sync)
 
         self.LEAGUE_ENDPOINT = FANTASY_BASE_ENDPOINT + FANTASY_SPORTS[sport]
         # older season data is stored at a different endpoint
@@ -198,6 +207,7 @@ class EspnFantasyRequests(object):
         data = self.league_get(params=params, headers=headers)
         return data
 
+<<<<<<< HEAD
     def get_player_news(self, playerId):
         '''Gets the player news'''
         params = {'playerId': playerId}
@@ -275,6 +285,15 @@ class EspnFantasyRequests(object):
         return raw_entries
 
     # Username and password no longer works using their API without using google recaptcha
+=======
+    def get_player_news(self, playerId):
+        '''Gets the player news'''
+        params = {'playerId': playerId}
+        data = self.news_get(params=params)
+        return data
+
+    # Username and password no longer works using their API without using google recaptcha
+>>>>>>> parent of 86e023e (Add API helpers for authenticated watchlist sync)
     # Possibly revisit in future if anything changes
 
     # def authentication(self, username: str, password: str):

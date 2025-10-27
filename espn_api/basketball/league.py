@@ -2,7 +2,6 @@ import json
 from typing import List, Set, Union
 
 from ..base_league import BaseLeague
-from ..requests.espn_requests import ESPNInvalidLeague, ESPNUnknownError
 from .team import Team
 from .player import Player
 from .matchup import Matchup
@@ -229,72 +228,6 @@ class League(BaseLeague):
                 )
                 for player in data['players']
             ]
-
-    def watchlist_players(self, limit: int = 2000, offset: int = 0, season_ids: List[int] = None) -> List[Player]:
-        """Return the authenticated user's ESPN watchlist entries as ``Player`` instances."""
-
-        if self.year < 2019:
-            raise Exception('Cant use watchlist before 2019')
-
-        seasons_to_try: List[int] = []
-        if season_ids:
-            seasons_to_try = list(season_ids)
-        else:
-            seasons_to_try = [self.year]
-            request_sport = getattr(self.espn_request, 'sport', None)
-            if request_sport in {'nba', 'wnba'}:
-                alt_season = self.year + 1
-                if alt_season not in seasons_to_try:
-                    seasons_to_try.append(alt_season)
-
-        pro_schedule = getattr(self, 'pro_schedule', None)
-
-        watchlist_entries: List[dict] = []
-        for season in seasons_to_try:
-            try:
-                entries = self.espn_request.get_watchlist_players(
-                    season_id=season,
-                    limit=limit,
-                    offset=offset,
-                )
-            except (ESPNInvalidLeague, ESPNUnknownError):
-                continue
-
-            if entries:
-                watchlist_entries = entries
-                break
-
-        if not watchlist_entries and seasons_to_try:
-            # If no players were found, return an empty list.
-            return []
-
-        players: List[Player] = []
-        seen_ids = set()
-        for entry in watchlist_entries:
-            if not isinstance(entry, dict):
-                continue
-
-            player_payload = entry.get('player') if isinstance(entry, dict) else None
-            if not isinstance(player_payload, dict):
-                pool_entry = entry.get('playerPoolEntry') if isinstance(entry, dict) else None
-                if isinstance(pool_entry, dict):
-                    player_payload = pool_entry.get('player')
-
-            player_id = None
-            if isinstance(entry, dict):
-                player_id = entry.get('playerId')
-            if player_id is None and isinstance(player_payload, dict):
-                player_id = player_payload.get('id')
-
-            if player_id is not None and player_id in seen_ids:
-                continue
-
-            if player_id is not None:
-                seen_ids.add(player_id)
-
-            players.append(Player(entry, self.year, pro_schedule))
-
-        return players
 
     def team_watchlist(self, team_id: int, size: int = 40) -> List[Player]:
         """Return the players that belong to the selected team's ESPN watchlist."""

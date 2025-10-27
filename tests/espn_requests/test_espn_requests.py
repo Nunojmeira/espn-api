@@ -1,13 +1,13 @@
 from unittest import mock, TestCase
 import requests_mock
 import io
-import json
-from espn_api.requests.espn_requests import EspnFantasyRequests, ESPNAccessDenied
+from espn_api.requests.espn_requests import EspnFantasyRequests
 
 class EspnRequestsTest(TestCase):
 
     @requests_mock.Mocker()
     @mock.patch('sys.stdout', new_callable=io.StringIO)
+<<<<<<< HEAD
     def test_stub(self, mock_request, mock_stdout):
         url_api_key = 'https://registerdisney.go.com/jgc/v5/client/ESPN-FANTASYLM-PROD/api-key?langPref=en-US'
         mock_request.post(url_api_key, status_code=400)
@@ -71,6 +71,11 @@ class EspnRequestsTest(TestCase):
             cookies=None,
             timeout=timeout,
         )
+=======
+    def test_stub(self, mock_request, mock_stdout):
+        url_api_key = 'https://registerdisney.go.com/jgc/v5/client/ESPN-FANTASYLM-PROD/api-key?langPref=en-US'
+        mock_request.post(url_api_key, status_code=400)
+>>>>>>> parent of 86e023e (Add API helpers for authenticated watchlist sync)
 
     # @requests_mock.Mocker()
     # @mock.patch('sys.stdout', new_callable=io.StringIO)

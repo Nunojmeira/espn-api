@@ -47,6 +47,31 @@ class EspnRequestsTest(TestCase):
         with self.assertRaises(ESPNAccessDenied):
             request.get_watchlist_players()
 
+    @mock.patch('espn_api.requests.espn_requests.requests.get')
+    def test_timeout_parameter_is_used_for_requests(self, mock_get):
+        mock_response = mock.Mock()
+        mock_response.status_code = 200
+        mock_response.json.return_value = {}
+        mock_get.return_value = mock_response
+
+        timeout = 5
+        request = EspnFantasyRequests(
+            sport='nba',
+            league_id=987654,
+            year=2024,
+            timeout=timeout,
+        )
+
+        request.get()
+
+        mock_get.assert_called_with(
+            request.ENDPOINT,
+            params=None,
+            headers=None,
+            cookies=None,
+            timeout=timeout,
+        )
+
     # @requests_mock.Mocker()
     # @mock.patch('sys.stdout', new_callable=io.StringIO)
     # def test_authentication_api_fail(self, mock_request, mock_stdout):

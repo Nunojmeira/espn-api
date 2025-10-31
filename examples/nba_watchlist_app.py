@@ -149,12 +149,21 @@ class NBAWatchlistApp:
         options_tab = ttk.Frame(notebook)
         notebook.add(options_tab, text="Options")
 
-        content = ttk.Frame(dashboard)
+        content = tk.PanedWindow(
+            dashboard,
+            orient=tk.HORIZONTAL,
+            sashrelief=tk.RIDGE,
+            sashwidth=8,
+            showhandle=True,
+        )
         content.pack(fill=tk.BOTH, expand=True, padx=0, pady=0)
 
+        player_section = ttk.Frame(content)
+        content.add(player_section, stretch="always", minsize=320)
+
         # League player directory -------------------------------------
-        player_frame = ttk.LabelFrame(content, text="League Player Pool")
-        player_frame.pack(side=tk.LEFT, fill=tk.BOTH, expand=True, padx=(0, 5))
+        player_frame = ttk.LabelFrame(player_section, text="League Player Pool")
+        player_frame.pack(fill=tk.BOTH, expand=True, padx=(0, 5))
 
         filter_row = ttk.Frame(player_frame)
         filter_row.pack(fill=tk.X, padx=5, pady=5)
@@ -210,11 +219,14 @@ class NBAWatchlistApp:
         self.player_tree.configure(yscrollcommand=player_scrollbar_y.set, xscrollcommand=player_scrollbar_x.set)
 
         # Watchlist table ----------------------------------------------
-        watchlist = ttk.LabelFrame(content, text="Watchlist")
-        watchlist.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+        watchlist_section = ttk.Frame(content)
+        content.add(watchlist_section, stretch="always", minsize=260)
+
+        watchlist_frame = ttk.LabelFrame(watchlist_section, text="Watchlist")
+        watchlist_frame.pack(fill=tk.BOTH, expand=True, padx=(5, 0))
 
         self.tree = ttk.Treeview(
-            watchlist,
+            watchlist_frame,
             columns=self.watchlist_base_columns,
             show="headings",
             height=16,
@@ -234,11 +246,11 @@ class NBAWatchlistApp:
                 stretch=True,
             )
 
-        self.tree.pack(fill=tk.BOTH, expand=True, side=tk.TOP, padx=5, pady=(0, 5))
+        self.tree.pack(fill=tk.BOTH, expand=True, side=tk.LEFT, padx=5, pady=(0, 5))
 
-        watchlist_scroll_y = ttk.Scrollbar(watchlist, orient=tk.VERTICAL, command=self.tree.yview)
+        watchlist_scroll_y = ttk.Scrollbar(watchlist_frame, orient=tk.VERTICAL, command=self.tree.yview)
         watchlist_scroll_y.pack(side=tk.RIGHT, fill=tk.Y)
-        watchlist_scroll_x = ttk.Scrollbar(watchlist, orient=tk.HORIZONTAL, command=self.tree.xview)
+        watchlist_scroll_x = ttk.Scrollbar(watchlist_frame, orient=tk.HORIZONTAL, command=self.tree.xview)
         watchlist_scroll_x.pack(side=tk.BOTTOM, fill=tk.X)
         self.tree.configure(yscrollcommand=watchlist_scroll_y.set, xscrollcommand=watchlist_scroll_x.set)
 
@@ -309,7 +321,20 @@ class NBAWatchlistApp:
         espn_s2 = espn_s2 or self._saved_preferences.get("espn_s2", "")
         swid = swid or self._saved_preferences.get("swid", "")
 
+        if getattr(self, "league", None) is not None:
+            loaded_league_id = getattr(self.league, "league_id", None)
+            loaded_year = getattr(self.league, "year", None)
+            if loaded_league_id is not None:
+                league_id = str(loaded_league_id)
+            if loaded_year is not None:
+                year = str(loaded_year)
+
+        league_id = league_id or self._saved_preferences.get("league_id", "")
+        year = year or self._saved_preferences.get("year", "")
+
         watchlist_key = self._current_watchlist_key()
+        if not watchlist_key and (league_id and year):
+            watchlist_key = self._compose_watchlist_key(league_id, year)
 
         self._save_preferences(
             league_id=league_id,

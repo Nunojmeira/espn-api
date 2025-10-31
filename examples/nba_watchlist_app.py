@@ -38,6 +38,13 @@ class NBAWatchlistApp:
         self.root.geometry("1280x620")
 
         self._saved_preferences, self._saved_column_widths = self._load_saved_preferences()
+        saved_geometry = self._saved_preferences.get("geometry")
+        if isinstance(saved_geometry, str) and saved_geometry.strip():
+            self.root.geometry(saved_geometry)
+
+        self._saved_paned_positions: Sequence[int] = tuple(
+            self._normalize_paned_positions(self._saved_preferences.get("paned_positions"))
+        )
         self._saved_column_widths.setdefault("player", {})
         self._saved_column_widths.setdefault("watchlist", {})
 
@@ -81,6 +88,7 @@ class NBAWatchlistApp:
         self._restore_column_widths()
         self._apply_column_settings("player")
         self._apply_column_settings("watchlist")
+        self.root.after(0, self._restore_paned_positions)
 
         self.root.protocol("WM_DELETE_WINDOW", self._on_close)
 
@@ -156,6 +164,7 @@ class NBAWatchlistApp:
             sashwidth=8,
             showhandle=True,
         )
+        self._content_pane = content
         content.pack(fill=tk.BOTH, expand=True, padx=0, pady=0)
 
         player_section = ttk.Frame(content)
@@ -289,6 +298,28 @@ class NBAWatchlistApp:
                 if isinstance(width, int) and width > 0:
                     tree.column(column_id, width=width)
 
+    def _restore_paned_positions(self) -> None:
+        pane = getattr(self, "_content_pane", None)
+        if not pane:
+            return
+
+        positions = getattr(self, "_saved_paned_positions", ())
+        if not positions:
+            return
+
+        panes = pane.panes()
+        if not panes:
+            return
+
+        max_index = len(panes) - 1
+        for index, value in enumerate(positions):
+            if index >= max_index:
+                break
+            try:
+                pane.sashpos(index, int(value))
+            except (tk.TclError, ValueError, TypeError):
+                continue
+
     def _capture_tree_widths(self, tree: ttk.Treeview) -> Dict[str, int]:
         widths: Dict[str, int] = {}
         if not tree:
@@ -300,6 +331,28 @@ class NBAWatchlistApp:
                 widths[column_id] = width
         return widths
 
+    def _capture_paned_positions(self) -> List[int]:
+        pane = getattr(self, "_content_pane", None)
+        positions: List[int] = []
+        if not pane:
+            return positions
+
+        panes = pane.panes()
+        if not panes:
+            return positions
+
+        for index in range(len(panes) - 1):
+            try:
+                pos = pane.sashpos(index)
+            except tk.TclError:
+                continue
+            try:
+                positions.append(int(pos))
+            except (TypeError, ValueError):
+                continue
+
+        return positions
+
     def _on_close(self) -> None:
         player_widths: Dict[str, int] = {}
         watchlist_widths: Dict[str, int] = {}
@@ -310,6 +363,13 @@ class NBAWatchlistApp:
 
         self._saved_column_widths["player"] = player_widths
         self._saved_column_widths["watchlist"] = watchlist_widths
+
+        geometry = self.root.winfo_geometry()
+        paned_positions = self._capture_paned_positions()
+        if paned_positions:
+            self._saved_paned_positions = tuple(paned_positions)
+        else:
+            self._saved_paned_positions = ()
 
         league_id = self.league_id_var.get().strip() if hasattr(self, "league_id_var") else self._saved_preferences.get("league_id", "")
         year = self.year_var.get().strip() if hasattr(self, "year_var") else self._saved_preferences.get("year", "")
@@ -344,6 +404,8 @@ class NBAWatchlistApp:
             watchlist_key=watchlist_key,
             watchlist_ids=self.watchlist_ids,
             column_widths=self._saved_column_widths,
+            geometry=geometry,
+            paned_positions=paned_positions,
         )
 
         self.root.destroy()
@@ -742,6 +804,14 @@ class NBAWatchlistApp:
 
         column_widths = self._normalize_column_widths(raw_data.get("column_widths"))
 
+        geometry = raw_data.get("geometry")
+        if isinstance(geometry, str) and geometry.strip():
+            data["geometry"] = geometry
+
+        paned_positions = self._normalize_paned_positions(raw_data.get("paned_positions"))
+        if paned_positions:
+            data["paned_positions"] = paned_positions
+
         return data, column_widths
 
     def _save_preferences(
@@ -754,6 +824,8 @@ class NBAWatchlistApp:
         watchlist_key: Optional[str] = None,
         watchlist_ids: Optional[Iterable[Any]] = None,
         column_widths: Optional[Dict[str, Dict[str, Any]]] = None,
+        geometry: Optional[str] = None,
+        paned_positions: Optional[Sequence[Any]] = None,
     ) -> None:
         data: Dict[str, Any] = dict(self._saved_preferences)
         watchlists: Dict[str, List[int]] = dict(data.get("watchlists", {}))
@@ -790,6 +862,19 @@ class NBAWatchlistApp:
 
         data["watchlists"] = watchlists
         data["column_widths"] = saved_widths
+
+        if geometry is not None:
+            if geometry:
+                data["geometry"] = str(geometry)
+            else:
+                data.pop("geometry", None)
+
+        if paned_positions is not None:
+            normalized_positions = self._normalize_paned_positions(paned_positions)
+            if normalized_positions:
+                data["paned_positions"] = normalized_positions
+            else:
+                data.pop("paned_positions", None)
         self._saved_preferences = data
         self._saved_column_widths = saved_widths
 
@@ -821,6 +906,21 @@ class NBAWatchlistApp:
                     filtered[column_id] = width_value
             if filtered:
                 normalized[table_key] = filtered
+        return normalized
+
+    def _normalize_paned_positions(self, positions: Any) -> List[int]:
+        """Sanitize persisted paned window sash positions."""
+        if not isinstance(positions, (list, tuple)):
+            return []
+
+        normalized: List[int] = []
+        for value in positions:
+            try:
+                position = int(value)
+            except (TypeError, ValueError):
+                continue
+            if position >= 0:
+                normalized.append(position)
         return normalized
 
     @staticmethod

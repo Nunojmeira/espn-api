@@ -246,7 +246,7 @@ class NBAWatchlistApp:
                 stretch=True,
             )
 
-        self.tree.pack(fill=tk.BOTH, expand=True, side=tk.TOP, padx=5, pady=(0, 5))
+        self.tree.pack(fill=tk.BOTH, expand=True, side=tk.LEFT, padx=5, pady=(0, 5))
 
         watchlist_scroll_y = ttk.Scrollbar(watchlist_frame, orient=tk.VERTICAL, command=self.tree.yview)
         watchlist_scroll_y.pack(side=tk.RIGHT, fill=tk.Y)

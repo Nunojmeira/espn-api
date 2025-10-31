@@ -316,8 +316,12 @@ class NBAWatchlistApp:
             if index >= max_index:
                 break
             try:
-                pane.sashpos(index, int(value))
-            except (tk.TclError, ValueError, TypeError):
+                x = int(value)
+            except (TypeError, ValueError):
+                continue
+            try:
+                pane.sash_place(index, x, 0)
+            except tk.TclError:
                 continue
 
     def _capture_tree_widths(self, tree: ttk.Treeview) -> Dict[str, int]:
@@ -343,13 +347,16 @@ class NBAWatchlistApp:
 
         for index in range(len(panes) - 1):
             try:
-                pos = pane.sashpos(index)
+                coord = pane.sash_coord(index)
             except tk.TclError:
                 continue
-            try:
-                positions.append(int(pos))
-            except (TypeError, ValueError):
+            if not coord:
                 continue
+            try:
+                x = int(coord[0])
+            except (TypeError, ValueError, IndexError):
+                continue
+            positions.append(x)
 
         return positions
 

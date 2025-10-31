@@ -37,16 +37,20 @@ class NBAWatchlistApp:
         self.root.title("ESPN NBA Fantasy Watchlist")
         self.root.geometry("1280x620")
 
-        self._saved_preferences, self._saved_column_widths = self._load_saved_preferences()
+        self._saved_preferences, self._saved_column_widths, self._saved_column_settings = self._load_saved_preferences()
         saved_geometry = self._saved_preferences.get("geometry")
         if isinstance(saved_geometry, str) and saved_geometry.strip():
             self.root.geometry(saved_geometry)
+
+        self._apply_dark_theme()
 
         self._saved_paned_positions: Sequence[int] = tuple(
             self._normalize_paned_positions(self._saved_preferences.get("paned_positions"))
         )
         self._saved_column_widths.setdefault("player", {})
         self._saved_column_widths.setdefault("watchlist", {})
+        self._saved_column_settings.setdefault("player", {})
+        self._saved_column_settings.setdefault("watchlist", {})
 
         self.league: Optional[League] = None
         self.watchlist_ids: List[int] = []
@@ -76,10 +80,20 @@ class NBAWatchlistApp:
             {"id": "last3", "title": "Past 3 Avg", "width": 90, "anchor": tk.CENTER, "visible": True},
             {"id": "last7", "title": "Past 7 Avg", "width": 90, "anchor": tk.CENTER, "visible": True},
         ]
-        self.player_column_order = [column["id"] for column in self.player_columns]
-        self.watchlist_column_order = [column["id"] for column in self.watchlist_columns]
-        self.player_base_columns = list(self.player_column_order)
-        self.watchlist_base_columns = list(self.watchlist_column_order)
+        self.player_base_columns = [column["id"] for column in self.player_columns]
+        self.watchlist_base_columns = [column["id"] for column in self.watchlist_columns]
+
+        self._apply_saved_visibility_defaults("player", self.player_columns)
+        self._apply_saved_visibility_defaults("watchlist", self.watchlist_columns)
+
+        self.player_column_order = self._sanitize_column_order(
+            self._saved_column_settings.get("player", {}).get("order"),
+            self.player_base_columns,
+        )
+        self.watchlist_column_order = self._sanitize_column_order(
+            self._saved_column_settings.get("watchlist", {}).get("order"),
+            self.watchlist_base_columns,
+        )
         self._column_visibility_vars: Dict[str, Dict[str, tk.BooleanVar]] = {"player": {}, "watchlist": {}}
         self._column_option_widgets: Dict[str, Dict[str, Any]] = {}
         self._live_plus_minus_cache: Dict[int, str] = {}
@@ -95,6 +109,99 @@ class NBAWatchlistApp:
     # ------------------------------------------------------------------
     # UI construction helpers
     # ------------------------------------------------------------------
+    def _apply_dark_theme(self) -> None:
+        """Attempt to switch the UI to a high-contrast dark theme."""
+
+        style = ttk.Style()
+        try:
+            style.theme_use("clam")
+        except tk.TclError:
+            pass
+
+        background = "#0f0f0f"
+        surface = "#1a1a1a"
+        accent = "#262626"
+        text = "#f5f5f5"
+        highlight = "#3a3a3a"
+
+        try:
+            self.root.configure(bg=background)
+        except tk.TclError:
+            return
+
+        style.configure(".", background=background, foreground=text)
+        style.configure("TFrame", background=background)
+        style.configure("TLabelframe", background=background, foreground=text)
+        style.configure("TLabelframe.Label", background=background, foreground=text)
+        style.configure("TLabel", background=background, foreground=text)
+        style.configure("TButton", background=surface, foreground=text)
+        style.map("TButton", background=[("active", highlight)])
+        style.configure("TCheckbutton", background=background, foreground=text)
+        style.configure("TMenubutton", background=surface, foreground=text)
+        style.configure("TEntry", fieldbackground=surface, foreground=text, insertcolor=text)
+        style.configure("TCombobox", fieldbackground=surface, foreground=text, background=surface)
+        style.map(
+            "TCombobox",
+            fieldbackground=[("readonly", surface)],
+            foreground=[("readonly", text)],
+        )
+        style.configure("TNotebook", background=background, foreground=text)
+        style.configure("TNotebook.Tab", background=surface, foreground=text)
+        style.map(
+            "TNotebook.Tab",
+            background=[("selected", accent)],
+            foreground=[("selected", text)],
+        )
+        style.configure("Treeview", background=surface, foreground=text, fieldbackground=surface)
+        style.map(
+            "Treeview",
+            background=[("selected", highlight)],
+            foreground=[("selected", text)],
+        )
+        style.configure("Treeview.Heading", background=accent, foreground=text)
+        style.configure("TScrollbar", background=surface, troughcolor=background)
+        style.configure("Horizontal.TScrollbar", background=surface, troughcolor=background)
+        style.configure("Vertical.TScrollbar", background=surface, troughcolor=background)
+
+    def _apply_saved_visibility_defaults(
+        self, key: str, configs: Sequence[Dict[str, Any]]
+    ) -> None:
+        """Update column configs to respect saved visibility preferences."""
+
+        saved_visibility = self._saved_column_settings.get(key, {}).get("visibility")
+        if not isinstance(saved_visibility, dict):
+            return
+
+        for config in configs:
+            column_id = config.get("id")
+            if not isinstance(column_id, str):
+                continue
+            if column_id in saved_visibility:
+                config["visible"] = bool(saved_visibility[column_id])
+
+    def _sanitize_column_order(
+        self, saved_order: Optional[Sequence[Any]], base_columns: Sequence[str]
+    ) -> List[str]:
+        """Combine saved ordering information with the default column order."""
+
+        seen: set[str] = set()
+        order: List[str] = []
+
+        if isinstance(saved_order, (list, tuple)):
+            for column_id in saved_order:
+                if not isinstance(column_id, str):
+                    continue
+                if column_id in base_columns and column_id not in seen:
+                    order.append(column_id)
+                    seen.add(column_id)
+
+        for column_id in base_columns:
+            if column_id not in seen:
+                order.append(column_id)
+                seen.add(column_id)
+
+        return order
+
     def _build_widgets(self) -> None:
         connection = ttk.LabelFrame(self.root, text="League Connection")
         connection.pack(fill=tk.X, padx=10, pady=5)
@@ -360,6 +467,18 @@ class NBAWatchlistApp:
 
         return positions
 
+    def _capture_column_settings(self) -> Dict[str, Dict[str, Any]]:
+        """Collect the current column ordering and visibility preferences."""
+
+        settings: Dict[str, Dict[str, Any]] = {}
+        for key in ("player", "watchlist"):
+            order = list(self._get_column_order(key))
+            visibility: Dict[str, bool] = {}
+            for column_id in order:
+                visibility[column_id] = self._column_is_visible(key, column_id)
+            settings[key] = {"order": order, "visibility": visibility}
+        return settings
+
     def _on_close(self) -> None:
         player_widths: Dict[str, int] = {}
         watchlist_widths: Dict[str, int] = {}
@@ -411,6 +530,7 @@ class NBAWatchlistApp:
             watchlist_key=watchlist_key,
             watchlist_ids=self.watchlist_ids,
             column_widths=self._saved_column_widths,
+            column_settings=self._capture_column_settings(),
             geometry=geometry,
             paned_positions=paned_positions,
         )
@@ -773,20 +893,23 @@ class NBAWatchlistApp:
     def _preferences_path(self) -> Path:
         return Path.home() / ".espn_nba_watchlist.json"
 
-    def _load_saved_preferences(self) -> Tuple[Dict[str, Any], Dict[str, Dict[str, int]]]:
+    def _load_saved_preferences(
+        self,
+    ) -> Tuple[Dict[str, Any], Dict[str, Dict[str, int]], Dict[str, Dict[str, Any]]]:
         path = self._preferences_path()
         base_preferences: Dict[str, Any] = {"watchlists": {}}
         base_widths: Dict[str, Dict[str, int]] = {}
+        base_settings: Dict[str, Dict[str, Any]] = {}
         try:
             with path.open("r", encoding="utf-8") as handle:
                 raw_data = json.load(handle)
         except FileNotFoundError:
-            return base_preferences, base_widths
+            return base_preferences, base_widths, base_settings
         except (OSError, json.JSONDecodeError):
-            return base_preferences, base_widths
+            return base_preferences, base_widths, base_settings
 
         if not isinstance(raw_data, dict):
-            return base_preferences, base_widths
+            return base_preferences, base_widths, base_settings
 
         data: Dict[str, Any] = {"watchlists": {}}
         for key in ("league_id", "year", "espn_s2", "swid"):
@@ -819,7 +942,11 @@ class NBAWatchlistApp:
         if paned_positions:
             data["paned_positions"] = paned_positions
 
-        return data, column_widths
+        column_settings = self._normalize_column_settings(raw_data.get("column_settings"))
+        if column_settings:
+            data["column_settings"] = column_settings
+
+        return data, column_widths, column_settings
 
     def _save_preferences(
         self,
@@ -831,12 +958,16 @@ class NBAWatchlistApp:
         watchlist_key: Optional[str] = None,
         watchlist_ids: Optional[Iterable[Any]] = None,
         column_widths: Optional[Dict[str, Dict[str, Any]]] = None,
+        column_settings: Optional[Dict[str, Dict[str, Any]]] = None,
         geometry: Optional[str] = None,
         paned_positions: Optional[Sequence[Any]] = None,
     ) -> None:
         data: Dict[str, Any] = dict(self._saved_preferences)
         watchlists: Dict[str, List[int]] = dict(data.get("watchlists", {}))
         saved_widths = self._normalize_column_widths(column_widths or self._saved_column_widths)
+        saved_column_settings = self._normalize_column_settings(
+            column_settings or self._saved_column_settings
+        )
 
         active_key: Optional[str] = None
         if league_id is not None:
@@ -869,6 +1000,10 @@ class NBAWatchlistApp:
 
         data["watchlists"] = watchlists
         data["column_widths"] = saved_widths
+        if saved_column_settings:
+            data["column_settings"] = saved_column_settings
+        elif "column_settings" in data:
+            data.pop("column_settings")
 
         if geometry is not None:
             if geometry:
@@ -884,6 +1019,7 @@ class NBAWatchlistApp:
                 data.pop("paned_positions", None)
         self._saved_preferences = data
         self._saved_column_widths = saved_widths
+        self._saved_column_settings = saved_column_settings
 
         path = self._preferences_path()
         try:
@@ -913,6 +1049,40 @@ class NBAWatchlistApp:
                     filtered[column_id] = width_value
             if filtered:
                 normalized[table_key] = filtered
+        return normalized
+
+    def _normalize_column_settings(
+        self, column_settings: Optional[Dict[str, Any]]
+    ) -> Dict[str, Dict[str, Any]]:
+        """Sanitize persisted column order and visibility preferences."""
+
+        if not isinstance(column_settings, dict):
+            return {}
+
+        normalized: Dict[str, Dict[str, Any]] = {}
+        for table_key, settings in column_settings.items():
+            if not isinstance(table_key, str) or not isinstance(settings, dict):
+                continue
+
+            entry: Dict[str, Any] = {}
+            order = settings.get("order")
+            if isinstance(order, (list, tuple)):
+                sanitized_order = [str(column_id) for column_id in order if isinstance(column_id, str) and column_id]
+                if sanitized_order:
+                    entry["order"] = sanitized_order
+
+            visibility = settings.get("visibility")
+            if isinstance(visibility, dict):
+                sanitized_visibility: Dict[str, bool] = {}
+                for column_id, value in visibility.items():
+                    if isinstance(column_id, str) and column_id:
+                        sanitized_visibility[column_id] = bool(value)
+                if sanitized_visibility:
+                    entry["visibility"] = sanitized_visibility
+
+            if entry:
+                normalized[table_key] = entry
+
         return normalized
 
     def _normalize_paned_positions(self, positions: Any) -> List[int]:

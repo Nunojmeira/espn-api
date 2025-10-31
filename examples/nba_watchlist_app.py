@@ -149,11 +149,17 @@ class NBAWatchlistApp:
         options_tab = ttk.Frame(notebook)
         notebook.add(options_tab, text="Options")
 
-        content = ttk.PanedWindow(dashboard, orient=tk.HORIZONTAL)
+        content = tk.PanedWindow(
+            dashboard,
+            orient=tk.HORIZONTAL,
+            sashrelief=tk.RIDGE,
+            sashwidth=8,
+            showhandle=True,
+        )
         content.pack(fill=tk.BOTH, expand=True, padx=0, pady=0)
 
         player_section = ttk.Frame(content)
-        content.add(player_section, weight=3)
+        content.add(player_section, stretch="always", minsize=320)
 
         # League player directory -------------------------------------
         player_frame = ttk.LabelFrame(player_section, text="League Player Pool")
@@ -214,7 +220,7 @@ class NBAWatchlistApp:
 
         # Watchlist table ----------------------------------------------
         watchlist_section = ttk.Frame(content)
-        content.add(watchlist_section, weight=2)
+        content.add(watchlist_section, stretch="always", minsize=260)
 
         watchlist_frame = ttk.LabelFrame(watchlist_section, text="Watchlist")
         watchlist_frame.pack(fill=tk.BOTH, expand=True, padx=(5, 0))

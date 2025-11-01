@@ -410,6 +410,11 @@ class NBAWatchlistApp:
         if not pane:
             return
 
+        try:
+            pane.update_idletasks()
+        except tk.TclError:
+            return
+
         positions = getattr(self, "_saved_paned_positions", ())
         if not positions:
             return
@@ -435,6 +440,10 @@ class NBAWatchlistApp:
         widths: Dict[str, int] = {}
         if not tree:
             return widths
+        try:
+            tree.update_idletasks()
+        except tk.TclError:
+            return widths
         for column_id in tree["columns"]:
             info = tree.column(column_id)
             width = self._coerce_positive_int(info.get("width"))
@@ -446,6 +455,11 @@ class NBAWatchlistApp:
         pane = getattr(self, "_content_pane", None)
         positions: List[int] = []
         if not pane:
+            return positions
+
+        try:
+            pane.update_idletasks()
+        except tk.TclError:
             return positions
 
         panes = pane.panes()
@@ -1443,14 +1457,33 @@ class NBAWatchlistApp:
             header_parts.append(date.strftime('%a %m/%d'))
         status = " ".join(header_parts) if header_parts else "Current game"
 
-        points = float(stat_entry.get("applied_total", 0.0) or 0.0)
-        totals = stat_entry.get("total") or {}
-        minutes = self._lookup_stat(totals, ("MIN", "MPG"))
-        fouls = self._lookup_stat(totals, ("PF",))
-        plus_minus = self._lookup_plus_minus(totals)
-        if plus_minus in {"-", ""}:
-            plus_minus = self._fetch_live_plus_minus(player)
-        return {"status": status, "points": points, "minutes": minutes, "fouls": fouls, "plus_minus": plus_minus}
+        totals_data = stat_entry.get("total")
+        totals = totals_data if isinstance(totals_data, dict) else {}
+        has_box_score = bool(totals)
+
+        points_value: Optional[float] = None
+        raw_points = stat_entry.get("applied_total")
+        if has_box_score:
+            try:
+                points_value = float(raw_points or 0.0)
+            except (TypeError, ValueError):
+                points_value = 0.0
+
+        minutes = self._lookup_stat(totals, ("MIN", "MPG")) if has_box_score else "-"
+        fouls = self._lookup_stat(totals, ("PF",)) if has_box_score else "-"
+        plus_minus = "-"
+        if has_box_score:
+            plus_minus = self._lookup_plus_minus(totals)
+            if plus_minus in {"-", ""}:
+                plus_minus = self._fetch_live_plus_minus(player)
+
+        return {
+            "status": status,
+            "points": points_value,
+            "minutes": minutes,
+            "fouls": fouls,
+            "plus_minus": plus_minus,
+        }
 
     def _calculate_average(self, player: Player, games: int) -> Optional[float]:
         totals: List[float] = []

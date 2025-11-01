@@ -437,8 +437,8 @@ class NBAWatchlistApp:
             return widths
         for column_id in tree["columns"]:
             info = tree.column(column_id)
-            width = info.get("width")
-            if isinstance(width, int) and width > 0:
+            width = self._coerce_positive_int(info.get("width"))
+            if width is not None:
                 widths[column_id] = width
         return widths
 
@@ -1172,7 +1172,7 @@ class NBAWatchlistApp:
                     "is_free_agent": False,
                     "avg_points": avg_points,
                     "recent_points": recent_points,
-                    "today_fpts": self._format_numeric(today_metrics.get("points")),
+                    "today_fpts": today_metrics.get("points"),
                     "status": self._format_player_status(player),
                 }
 
@@ -1192,7 +1192,7 @@ class NBAWatchlistApp:
                 "is_free_agent": True,
                 "avg_points": getattr(player, "avg_points", None),
                 "recent_points": self._calculate_average(player, games=7),
-                "today_fpts": self._format_numeric(today_metrics.get("points")),
+                "today_fpts": today_metrics.get("points"),
                 "status": self._format_player_status(player),
             }
             if player.playerId in players:
@@ -1207,7 +1207,34 @@ class NBAWatchlistApp:
             else:
                 players[player.playerId] = entry
 
+        self._apply_box_score_points(players)
         self.league_players = players
+
+    def _apply_box_score_points(self, players: Dict[int, Dict[str, Any]]) -> None:
+        if not players or not self.league:
+            return
+
+        try:
+            box_scores = self.league.box_scores(
+                matchup_period=self.league.currentMatchupPeriod,
+                scoring_period=self.league.scoringPeriodId,
+                matchup_total=False,
+            )
+        except Exception:
+            return
+
+        for box_score in box_scores:
+            for lineup in (getattr(box_score, "home_lineup", []), getattr(box_score, "away_lineup", [])):
+                for entry in lineup:
+                    player_id = getattr(entry, "playerId", None)
+                    if not isinstance(player_id, int):
+                        continue
+                    try:
+                        points = float(getattr(entry, "points", None))
+                    except (TypeError, ValueError):
+                        continue
+                    if player_id in players:
+                        players[player_id]["today_fpts"] = points
 
     def _populate_player_directory(self) -> None:
         if not hasattr(self, "player_tree"):
@@ -1233,7 +1260,7 @@ class NBAWatchlistApp:
                 "nba_team": info["pro_team"],
                 "position": info["position"],
                 "availability": availability,
-                "today_fpts": info.get("today_fpts", "-"),
+                "today_fpts": self._format_numeric(info.get("today_fpts")),
                 "fpts_avg": self._format_numeric(info.get("avg_points")),
                 "recent": self._format_numeric(info.get("recent_points")),
                 "status": info.get("status", "Active"),
@@ -1456,7 +1483,19 @@ class NBAWatchlistApp:
     def _format_numeric(value: Optional[float]) -> str:
         if value is None:
             return "-"
-        return f"{value:.2f}"
+        try:
+            numeric = float(value)
+        except (TypeError, ValueError):
+            return "-"
+        return f"{numeric:.2f}"
+
+    @staticmethod
+    def _coerce_positive_int(value: Any) -> Optional[int]:
+        try:
+            integer = int(float(value))
+        except (TypeError, ValueError):
+            return None
+        return integer if integer > 0 else None
 
     def _format_schedule(self, player: Player, periods: Iterable[int], fallback: str) -> str:
         entries: List[str] = []

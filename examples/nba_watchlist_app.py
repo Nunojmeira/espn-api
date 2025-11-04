@@ -64,6 +64,7 @@ class NBAWatchlistApp:
             {"id": "availability", "title": "Availability", "width": 190, "anchor": tk.W, "visible": True},
             {"id": "today_fpts", "title": "FPts", "width": 90, "anchor": tk.CENTER, "visible": True},
             {"id": "fpts_avg", "title": "Season Avg FPts", "width": 130, "anchor": tk.CENTER, "visible": True},
+            {"id": "recent3", "title": "Last 3 Avg FPts", "width": 130, "anchor": tk.CENTER, "visible": False},
             {"id": "recent", "title": "Last 7 Avg FPts", "width": 130, "anchor": tk.CENTER, "visible": True},
             {"id": "status", "title": "Status", "width": 160, "anchor": tk.W, "visible": True},
         ]
@@ -1174,21 +1175,11 @@ class NBAWatchlistApp:
         players: Dict[int, Dict[str, Any]] = {}
         for team in self.league.teams:
             for player in team.roster:
-                avg_points = getattr(player, "avg_points", None)
-                recent_points = self._calculate_average(player, games=7)
-                today_metrics = self._get_today_metrics(player)
-                players[player.playerId] = {
-                    "player_id": player.playerId,
-                    "name": player.name,
-                    "pro_team": player.proTeam,
-                    "position": player.position,
-                    "fantasy_team": team.team_name,
-                    "is_free_agent": False,
-                    "avg_points": avg_points,
-                    "recent_points": recent_points,
-                    "today_fpts": today_metrics.get("points"),
-                    "status": self._format_player_status(player),
-                }
+                players[player.playerId] = self._build_player_entry(
+                    player=player,
+                    fantasy_team=team.team_name,
+                    is_free_agent=False,
+                )
 
         try:
             free_agents = self.league.free_agents(size=500)
@@ -1196,33 +1187,56 @@ class NBAWatchlistApp:
             free_agents = []
 
         for player in free_agents:
-            today_metrics = self._get_today_metrics(player)
-            entry = {
-                "player_id": player.playerId,
-                "name": player.name,
-                "pro_team": player.proTeam,
-                "position": player.position,
-                "fantasy_team": "Free Agent",
-                "is_free_agent": True,
-                "avg_points": getattr(player, "avg_points", None),
-                "recent_points": self._calculate_average(player, games=7),
-                "today_fpts": today_metrics.get("points"),
-                "status": self._format_player_status(player),
-            }
+            entry = self._build_player_entry(
+                player=player,
+                fantasy_team="Free Agent",
+                is_free_agent=True,
+            )
             if player.playerId in players:
-                players[player.playerId]["is_free_agent"] = True
-                players[player.playerId]["name"] = player.name
-                players[player.playerId]["pro_team"] = player.proTeam
-                players[player.playerId]["position"] = player.position
-                players[player.playerId]["avg_points"] = entry["avg_points"]
-                players[player.playerId]["recent_points"] = entry["recent_points"]
-                players[player.playerId]["today_fpts"] = entry["today_fpts"]
-                players[player.playerId]["status"] = entry["status"]
+                existing = players[player.playerId]
+                existing["is_free_agent"] = True
+                for key in (
+                    "name",
+                    "pro_team",
+                    "position",
+                    "avg_points",
+                    "recent_points",
+                    "recent_points_3",
+                    "recent_points_7",
+                    "today_fpts",
+                    "status",
+                ):
+                    value = entry.get(key)
+                    if value is not None:
+                        existing[key] = value
             else:
                 players[player.playerId] = entry
 
         self._apply_box_score_points(players)
         self.league_players = players
+
+    def _build_player_entry(
+        self,
+        player: Player,
+        fantasy_team: str,
+        is_free_agent: bool,
+    ) -> Dict[str, Any]:
+        averages = self._calculate_recent_averages(player, windows=(3, 7), include_current=False)
+        today_points = self._get_today_points(player)
+        return {
+            "player_id": player.playerId,
+            "name": player.name,
+            "pro_team": player.proTeam,
+            "position": player.position,
+            "fantasy_team": fantasy_team,
+            "is_free_agent": is_free_agent,
+            "avg_points": getattr(player, "avg_points", None),
+            "recent_points": averages.get(7),
+            "recent_points_3": averages.get(3),
+            "recent_points_7": averages.get(7),
+            "today_fpts": today_points,
+            "status": self._format_player_status(player),
+        }
 
     def _apply_box_score_points(self, players: Dict[int, Dict[str, Any]]) -> None:
         if not players or not self.league:
@@ -1276,7 +1290,10 @@ class NBAWatchlistApp:
                 "availability": availability,
                 "today_fpts": self._format_numeric(info.get("today_fpts")),
                 "fpts_avg": self._format_numeric(info.get("avg_points")),
-                "recent": self._format_numeric(info.get("recent_points")),
+                "recent3": self._format_numeric(info.get("recent_points_3")),
+                "recent": self._format_numeric(
+                    info.get("recent_points_7", info.get("recent_points"))
+                ),
                 "status": info.get("status", "Active"),
             }
             values = tuple(row.get(column_id, "-") for column_id in self.player_base_columns)
@@ -1369,8 +1386,14 @@ class NBAWatchlistApp:
             self._get_next_week_periods(player),
             fallback="Next week's schedule unavailable.",
         )
-        last3 = self._calculate_average(player, games=3)
-        last7 = self._calculate_average(player, games=7)
+        last3 = info.get("recent_points_3")
+        last7 = info.get("recent_points_7", info.get("recent_points"))
+        if last3 is None or last7 is None:
+            averages = self._calculate_recent_averages(player, windows=(3, 7), include_current=False)
+            if last3 is None:
+                last3 = averages.get(3)
+            if last7 is None:
+                last7 = averages.get(7)
 
         row = {
             "player": player.name,
@@ -1427,6 +1450,24 @@ class NBAWatchlistApp:
                 break
 
         return upcoming
+
+    def _get_today_points(self, player: Player) -> Optional[float]:
+        if not self.league:
+            return None
+
+        scoring_period = str(self.league.scoringPeriodId)
+        stat_entry = player.stats.get(scoring_period)
+        if not isinstance(stat_entry, dict):
+            return None
+
+        value = stat_entry.get("applied_total")
+        if value is None:
+            return None
+
+        try:
+            return float(value)
+        except (TypeError, ValueError):
+            return None
 
     def _get_today_metrics(self, player: Player) -> Dict[str, Any]:
         if not self.league:
@@ -1485,20 +1526,64 @@ class NBAWatchlistApp:
             "plus_minus": plus_minus,
         }
 
-    def _calculate_average(self, player: Player, games: int) -> Optional[float]:
-        totals: List[float] = []
-        numeric_keys = sorted((int(key) for key in player.stats.keys() if key.isdigit()), reverse=True)
+    def _calculate_recent_averages(
+        self,
+        player: Player,
+        windows: Sequence[int],
+        *,
+        include_current: bool = True,
+    ) -> Dict[int, Optional[float]]:
+        valid_windows = sorted({int(window) for window in windows if isinstance(window, int) and window > 0})
+        results: Dict[int, Optional[float]] = {window: None for window in valid_windows}
+        if not valid_windows:
+            return results
+
+        numeric_keys = sorted(
+            (int(key) for key in player.stats.keys() if str(key).isdigit()),
+            reverse=True,
+        )
+        values: List[float] = []
+        max_window = max(valid_windows)
+        current_period = None
+        if not include_current and self.league:
+            try:
+                current_period = int(self.league.scoringPeriodId)
+            except (TypeError, ValueError):
+                current_period = None
+
         for scoring_period in numeric_keys:
+            if current_period is not None and scoring_period == current_period:
+                continue
             stat_line = player.stats.get(str(scoring_period), {})
             value = stat_line.get("applied_total")
             if value is None:
                 continue
-            totals.append(float(value))
-            if len(totals) >= games:
+            try:
+                values.append(float(value))
+            except (TypeError, ValueError):
+                continue
+            if len(values) >= max_window:
                 break
-        if not totals:
-            return None
-        return sum(totals) / len(totals)
+
+        if not values:
+            return results
+
+        cumulative: List[float] = []
+        running_total = 0.0
+        for value in values:
+            running_total += value
+            cumulative.append(running_total)
+
+        for window in valid_windows:
+            count = min(window, len(cumulative))
+            total = cumulative[count - 1]
+            results[window] = total / count
+
+        return results
+
+    def _calculate_average(self, player: Player, games: int) -> Optional[float]:
+        averages = self._calculate_recent_averages(player, windows=(games,), include_current=False)
+        return averages.get(games)
 
     def _format_player_status(self, player: Player) -> str:
         parts: List[str] = []

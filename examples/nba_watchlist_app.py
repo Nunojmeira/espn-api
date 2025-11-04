@@ -1221,7 +1221,7 @@ class NBAWatchlistApp:
         fantasy_team: str,
         is_free_agent: bool,
     ) -> Dict[str, Any]:
-        averages = self._calculate_recent_averages(player, windows=(3, 7))
+        averages = self._calculate_recent_averages(player, windows=(3, 7), include_current=False)
         today_points = self._get_today_points(player)
         return {
             "player_id": player.playerId,
@@ -1389,7 +1389,7 @@ class NBAWatchlistApp:
         last3 = info.get("recent_points_3")
         last7 = info.get("recent_points_7", info.get("recent_points"))
         if last3 is None or last7 is None:
-            averages = self._calculate_recent_averages(player, windows=(3, 7))
+            averages = self._calculate_recent_averages(player, windows=(3, 7), include_current=False)
             if last3 is None:
                 last3 = averages.get(3)
             if last7 is None:
@@ -1527,7 +1527,11 @@ class NBAWatchlistApp:
         }
 
     def _calculate_recent_averages(
-        self, player: Player, windows: Sequence[int]
+        self,
+        player: Player,
+        windows: Sequence[int],
+        *,
+        include_current: bool = True,
     ) -> Dict[int, Optional[float]]:
         valid_windows = sorted({int(window) for window in windows if isinstance(window, int) and window > 0})
         results: Dict[int, Optional[float]] = {window: None for window in valid_windows}
@@ -1540,8 +1544,16 @@ class NBAWatchlistApp:
         )
         values: List[float] = []
         max_window = max(valid_windows)
+        current_period = None
+        if not include_current and self.league:
+            try:
+                current_period = int(self.league.scoringPeriodId)
+            except (TypeError, ValueError):
+                current_period = None
 
         for scoring_period in numeric_keys:
+            if current_period is not None and scoring_period == current_period:
+                continue
             stat_line = player.stats.get(str(scoring_period), {})
             value = stat_line.get("applied_total")
             if value is None:
@@ -1570,7 +1582,7 @@ class NBAWatchlistApp:
         return results
 
     def _calculate_average(self, player: Player, games: int) -> Optional[float]:
-        averages = self._calculate_recent_averages(player, windows=(games,))
+        averages = self._calculate_recent_averages(player, windows=(games,), include_current=False)
         return averages.get(games)
 
     def _format_player_status(self, player: Player) -> str:

@@ -63,6 +63,20 @@ from espn_api.baseball import League
 league = League(league_id=222, year=2019)
 ```
 
+### Windows NBA Watchlist App
+
+The repository includes an example Tkinter desktop application that can be
+run on Windows (or any OS with Python 3) to track NBA fantasy player stats,
+view schedules, and maintain a customizable watchlist.
+
+```bash
+python examples/nba_watchlist_app.py
+```
+
+The app supports authenticated private leagues by providing `espn_s2` and
+`SWID` cookies within the UI and offers quick roster imports for any team in
+the league.
+
 
 ## [Discussions](https://github.com/cwendt94/espn-api/discussions) (new)
 If you have any questions about the package, ESPN API data, or want to talk about a feature please start a [discussion](https://github.com/cwendt94/espn-api/discussions)! 
